@@ -82,6 +82,7 @@ class MessageBridge:
     async def get_discord_user_from_topic(self, topic_id: int) -> dict:
         """Get Discord user info from Telegram topic ID"""
         mapping = mappings_collection.find_one({"telegram_topic_id": topic_id})
+        logger.debug(f"Looking up mapping for topic {topic_id}: {mapping}")
         return mapping
         
     async def forward_discord_to_telegram(self, message: discord.Message):
@@ -214,6 +215,7 @@ class MessageBridge:
         try:
             # Get Discord user from topic mapping
             mapping = await self.get_discord_user_from_topic(topic_id)
+            logger.debug(f"Retrieved mapping for topic {topic_id}: {mapping}")
             if not mapping:
                 logger.warning(f"No Discord user mapping found for topic {topic_id}")
                 return

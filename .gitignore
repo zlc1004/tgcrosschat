@@ -1,6 +1,9 @@
 # Environment variables
 .env
 
+# MongoDB data directory
+mongo_data/
+
 # Python
 __pycache__/
 *.py[cod]

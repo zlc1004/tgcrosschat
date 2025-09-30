@@ -253,7 +253,9 @@ class MessageBridge:
             
             # Create DM channel
             try:
-                dm_channel = await discord_client.get_channel(discord_user.id)
+                dm_channel = discord_user.dm_channel
+                if dm_channel is None:
+                    dm_channel = await discord_user.create_dm()
                 logger.info(f"DM channel created: {dm_channel.id}")
             except Exception as e:
                 logger.error(f"Failed to create DM channel with {discord_user.name}: {e}")
@@ -402,7 +404,9 @@ class MessageBridge:
             if discord_user:
                 try:
                     # Create/get DM channel
-                    dm_channel = await discord_user.create_dm()
+                    dm_channel = discord_user.dm_channel
+                    if dm_channel is None:
+                        dm_channel = await discord_user.create_dm()
                     discord_msg = await dm_channel.fetch_message(message_mapping["discord_message_id"])
                     new_content = f"{update.edited_message.text or '[Media/File]'} *[edited]*"
                     await discord_msg.edit(content=new_content)

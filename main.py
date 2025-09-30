@@ -249,6 +249,14 @@ class MessageBridge:
             
             logger.info(f"Found Discord user: {discord_user.name}#{discord_user.discriminator} (ID: {discord_user.id})")
             
+            # Create DM channel
+            try:
+                dm_channel = await discord_user.create_dm()
+                logger.info(f"DM channel created: {dm_channel.id}")
+            except Exception as e:
+                logger.error(f"Failed to create DM channel with {discord_user.name}: {e}")
+                return
+            
             # Check if this is a reply to another message
             reference = None
             if update.message.reply_to_message:
@@ -260,7 +268,7 @@ class MessageBridge:
                 if reply_mapping and reply_mapping.get("discord_message_id"):
                     # Create a message reference for Discord
                     try:
-                        original_message = await discord_user.dm_channel.fetch_message(reply_mapping["discord_message_id"])
+                        original_message = await dm_channel.fetch_message(reply_mapping["discord_message_id"])
                         reference = original_message
                     except:
                         pass  # If we can't fetch the original message, just send without reference
@@ -270,23 +278,15 @@ class MessageBridge:
             
             logger.info(f"Attempting to send message to {discord_user.name}: '{content}'")
             
-            # Try to create DM channel first
-            try:
-                dm_channel = discord_user.dm_channel or await discord_user.create_dm()
-                logger.info(f"DM channel created/found: {dm_channel.id}")
-            except Exception as e:
-                logger.error(f"Failed to create DM channel with {discord_user.name}: {e}")
-                return
-            
             if reference:
                 discord_msg = await reference.reply(content)
             else:
-                discord_msg = await discord_user.send(content)
+                discord_msg = await dm_channel.send(content)
             
             # Store message mapping
             message_doc = {
                 "message_content": content,
-                "discord_channel_id": discord_user.dm_channel.id if discord_user.dm_channel else None,
+                "discord_channel_id": dm_channel.id,
                 "discord_message_id": discord_msg.id,
                 "telegram_channel_id": TOPICS_CHANNEL_ID,
                 "telegram_topic_id": topic_id,
@@ -361,9 +361,11 @@ class MessageBridge:
             discord_user_id = mapping["discord_user_id"]
             discord_user = await discord_client.fetch_user(discord_user_id)
             
-            if discord_user and discord_user.dm_channel:
+            if discord_user:
                 try:
-                    discord_msg = await discord_user.dm_channel.fetch_message(message_mapping["discord_message_id"])
+                    # Create/get DM channel
+                    dm_channel = await discord_user.create_dm()
+                    discord_msg = await dm_channel.fetch_message(message_mapping["discord_message_id"])
                     new_content = f"{update.edited_message.text or '[Media/File]'} *[edited]*"
                     await discord_msg.edit(content=new_content)
                     

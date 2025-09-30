@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  tgcrosschat:
+    build:
+      context: .
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: tgcrosschat
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
+

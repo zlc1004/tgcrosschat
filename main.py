@@ -241,6 +241,7 @@ class MessageBridge:
             
     async def _send_discord_message(self, discord_user_id: int, update: Update, topic_id: int):
         """Helper method to send Discord message in Discord's event loop"""
+        discord_user = None
         try:
             # Get Discord user
             discord_user = await discord_client.fetch_user(discord_user_id)
@@ -307,7 +308,10 @@ class MessageBridge:
             
             # Log comprehensive debug info
             logger.debug(f"Discord user ID: {discord_user_id}")
-            logger.debug(f"Discord user: {discord_user.name}#{discord_user.discriminator} (ID: {discord_user.id})")
+            if discord_user:
+                logger.debug(f"Discord user: {discord_user.name}#{discord_user.discriminator} (ID: {discord_user.id})")
+            else:
+                logger.debug(f"Discord user: NOT FOUND")
             logger.debug(f"Telegram topic ID: {topic_id}")
             logger.debug(f"Telegram message ID: {update.message.message_id}")
             logger.debug(f"Message content: '{update.message.text or '[Media/File]'}'")

@@ -15,10 +15,11 @@ load_dotenv()
 
 # Enable logging
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.DEBUG
 )
 # set higher logging level for httpx to avoid all GET and POST requests being logged
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("pymongo").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -302,13 +303,46 @@ class MessageBridge:
             
         except Exception as e:
             logger.error(f"Failed to send Discord message: {e}")
-            # Log more details about the error
+            logger.error(f"Exception type: {type(e).__name__}")
+            
+            # Log comprehensive debug info
+            logger.debug(f"Discord user ID: {discord_user_id}")
+            logger.debug(f"Discord user: {discord_user.name}#{discord_user.discriminator} (ID: {discord_user.id})")
+            logger.debug(f"Telegram topic ID: {topic_id}")
+            logger.debug(f"Telegram message ID: {update.message.message_id}")
+            logger.debug(f"Message content: '{update.message.text or '[Media/File]'}'")
+            logger.debug(f"From Telegram user: {update.message.from_user.username} (ID: {update.message.from_user.id})")
+            
+            # Log more details about the Discord error
             if hasattr(e, 'status'):
                 logger.error(f"HTTP Status: {e.status}")
             if hasattr(e, 'code'):
                 logger.error(f"Error Code: {e.code}")
             if hasattr(e, 'text'):
                 logger.error(f"Error Text: {e.text}")
+            if hasattr(e, 'response'):
+                logger.error(f"Response: {e.response}")
+            if hasattr(e, 'args'):
+                logger.error(f"Error Args: {e.args}")
+                
+            # Check if it's a specific Discord error
+            import discord
+            if isinstance(e, discord.HTTPException):
+                logger.error(f"Discord HTTP Exception - Status: {e.status}, Code: {e.code}")
+                logger.error(f"Discord Error Response: {e.response}")
+            elif isinstance(e, discord.Forbidden):
+                logger.error(f"Discord Forbidden Error - This usually means:")
+                logger.error(f"  - User has DMs disabled")
+                logger.error(f"  - User blocked the bot")
+                logger.error(f"  - Missing permissions")
+            elif isinstance(e, discord.NotFound):
+                logger.error(f"Discord Not Found - User or channel doesn't exist")
+            elif isinstance(e, discord.DiscordServerError):
+                logger.error(f"Discord Server Error - Internal Discord issue")
+                
+            # Print full traceback for debugging
+            import traceback
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             
     async def edit_telegram_message_in_discord(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Edit corresponding Discord message when Telegram message is edited"""

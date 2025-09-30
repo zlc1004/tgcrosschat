@@ -256,7 +256,7 @@ class MessageBridge:
                 dm_channel = discord_user.dm_channel
                 if dm_channel is None:
                     dm_channel = await discord_user.create_dm()
-                logger.info(f"DM channel created: {dm_channel.id}")
+                logger.info(f"DM channel created/found: {dm_channel.id}")
             except Exception as e:
                 logger.error(f"Failed to create DM channel with {discord_user.name}: {e}")
                 return
@@ -305,11 +305,25 @@ class MessageBridge:
             logger.info(f"Forwarded Telegram message from topic {topic_id} to Discord user {discord_user_id}")
             
         except Exception as e:
+            import discord
+            
+            # Handle specific Discord errors more gracefully
+            if isinstance(e, discord.Forbidden):
+                logger.warning(f"Cannot access Discord user {discord_user_id} - User may have DMs disabled, blocked the selfbot, or privacy settings prevent access")
+                logger.info(f"Skipping message from Telegram topic {topic_id} due to Discord access restrictions")
+                return
+            elif isinstance(e, discord.NotFound):
+                logger.warning(f"Discord user {discord_user_id} not found - User may no longer exist")
+                logger.info(f"You may want to delete the mapping for topic {topic_id} as the Discord user no longer exists")
+                return
+            
+            # For other errors, log detailed debug info
             logger.error(f"Failed to send Discord message: {e}")
             logger.error(f"Exception type: {type(e).__name__}")
             
             # Log comprehensive debug info
             logger.debug(f"Discord user ID: {discord_user_id}")
+            discord_user = discord_client.get_user(discord_user_id)
             if discord_user:
                 logger.debug(f"Discord user: {discord_user.name}#{discord_user.discriminator} (ID: {discord_user.id})")
             else:
@@ -319,7 +333,7 @@ class MessageBridge:
             logger.debug(f"Message content: '{update.message.text or '[Media/File]'}'")
             logger.debug(f"From Telegram user: {update.message.from_user.username} (ID: {update.message.from_user.id})")
             
-            # Log more details about the Discord error
+            # Log more details about the Discord error for non-403/404 errors
             if hasattr(e, 'status'):
                 logger.error(f"HTTP Status: {e.status}")
             if hasattr(e, 'code'):
@@ -328,27 +342,16 @@ class MessageBridge:
                 logger.error(f"Error Text: {e.text}")
             if hasattr(e, 'response'):
                 logger.error(f"Response: {e.response}")
-            if hasattr(e, 'args'):
-                logger.error(f"Error Args: {e.args}")
                 
-            # Check if it's a specific Discord error
-            import discord
             if isinstance(e, discord.HTTPException):
                 logger.error(f"Discord HTTP Exception - Status: {e.status}, Code: {e.code}")
-                logger.error(f"Discord Error Response: {e.response}")
-            elif isinstance(e, discord.Forbidden):
-                logger.error(f"Discord Forbidden Error - This usually means:")
-                logger.error(f"  - User has DMs disabled")
-                logger.error(f"  - User blocked the bot")
-                logger.error(f"  - Missing permissions")
-            elif isinstance(e, discord.NotFound):
-                logger.error(f"Discord Not Found - User or channel doesn't exist")
             elif isinstance(e, discord.DiscordServerError):
                 logger.error(f"Discord Server Error - Internal Discord issue")
                 
-            # Print full traceback for debugging
-            import traceback
-            logger.error(f"Full traceback:\n{traceback.format_exc()}")
+            # Print traceback for unexpected errors only
+            if not isinstance(e, (discord.Forbidden, discord.NotFound)):
+                import traceback
+                logger.error(f"Full traceback:\n{traceback.format_exc()}")
             
     async def edit_telegram_message_in_discord(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Edit corresponding Discord message when Telegram message is edited"""

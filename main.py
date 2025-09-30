@@ -90,6 +90,17 @@ class MessageBridge:
             # Get or create topic for this user
             topic_id = await self.get_or_create_topic(username, user_id)
             
+            # Check if this is a reply to another message
+            reply_to_message_id = None
+            if message.reference and message.reference.message_id:
+                # Find the corresponding Telegram message
+                reply_mapping = messages_collection.find_one({
+                    "discord_message_id": message.reference.message_id,
+                    "direction": "discord_to_telegram"
+                })
+                if reply_mapping:
+                    reply_to_message_id = reply_mapping["telegram_message_id"]
+            
             # Prepare the message content
             content = f"**{user_display_name}** (@{username}):\n{message.content}"
             
@@ -98,7 +109,8 @@ class MessageBridge:
                 chat_id=TOPICS_CHANNEL_ID,
                 message_thread_id=topic_id,
                 text=content,
-                parse_mode=ParseMode.MARKDOWN
+                parse_mode=ParseMode.MARKDOWN,
+                reply_to_message_id=reply_to_message_id
             )
             
             # Store message mapping
@@ -110,7 +122,9 @@ class MessageBridge:
                 "telegram_topic_id": topic_id,
                 "telegram_message_id": telegram_msg.message_id,
                 "direction": "discord_to_telegram",
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.utcnow(),
+                "is_reply": reply_to_message_id is not None,
+                "reply_to_telegram_id": reply_to_message_id
             }
             messages_collection.insert_one(message_doc)
             
@@ -135,6 +149,48 @@ class MessageBridge:
             
         except Exception as e:
             logger.error(f"Failed to forward Discord message from {username}: {e}")
+            
+    async def edit_discord_message_in_telegram(self, before: discord.Message, after: discord.Message):
+        """Edit corresponding Telegram message when Discord message is edited"""
+        try:
+            # Find the corresponding Telegram message
+            message_mapping = messages_collection.find_one({
+                "discord_message_id": after.id,
+                "direction": "discord_to_telegram"
+            })
+            
+            if not message_mapping:
+                logger.warning(f"No Telegram message found for edited Discord message {after.id}")
+                return
+                
+            # Prepare the updated content
+            username = after.author.name
+            user_display_name = after.author.display_name
+            content = f"**{user_display_name}** (@{username}) *[edited]*:\n{after.content}"
+            
+            # Edit the Telegram message
+            await self.telegram_bot.edit_message_text(
+                chat_id=TOPICS_CHANNEL_ID,
+                message_id=message_mapping["telegram_message_id"],
+                text=content,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            # Update the database record
+            messages_collection.update_one(
+                {"_id": message_mapping["_id"]},
+                {
+                    "$set": {
+                        "message_content": after.content,
+                        "last_edited": datetime.utcnow()
+                    }
+                }
+            )
+            
+            logger.info(f"Edited Telegram message {message_mapping['telegram_message_id']} for Discord edit")
+            
+        except Exception as e:
+            logger.error(f"Failed to edit Telegram message for Discord edit: {e}")
             
     async def forward_telegram_to_discord(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Forward Telegram topic message to Discord DM"""
@@ -165,21 +221,43 @@ class MessageBridge:
             if not discord_user:
                 logger.error(f"Could not find Discord user {discord_user_id}")
                 return
+            
+            # Check if this is a reply to another message
+            reference = None
+            if update.message.reply_to_message:
+                # Find the corresponding Discord message
+                reply_mapping = messages_collection.find_one({
+                    "telegram_message_id": update.message.reply_to_message.message_id,
+                    "direction": "telegram_to_discord"
+                })
+                if reply_mapping and reply_mapping.get("discord_message_id"):
+                    # Create a message reference for Discord
+                    try:
+                        original_message = await discord_user.dm_channel.fetch_message(reply_mapping["discord_message_id"])
+                        reference = original_message
+                    except:
+                        pass  # If we can't fetch the original message, just send without reference
                 
             # Send message to Discord DM
             content = update.message.text or "[Media/File]"
-            await discord_user.send(content)
+            
+            if reference:
+                discord_msg = await reference.reply(content)
+            else:
+                discord_msg = await discord_user.send(content)
             
             # Store message mapping
             message_doc = {
                 "message_content": content,
                 "discord_channel_id": discord_user.dm_channel.id if discord_user.dm_channel else None,
-                "discord_message_id": None,  # We don't get the sent message object back
+                "discord_message_id": discord_msg.id,
                 "telegram_channel_id": TOPICS_CHANNEL_ID,
                 "telegram_topic_id": topic_id,
                 "telegram_message_id": update.message.message_id,
                 "direction": "telegram_to_discord",
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.utcnow(),
+                "is_reply": reference is not None,
+                "reply_to_discord_id": reference.id if reference else None
             }
             messages_collection.insert_one(message_doc)
             
@@ -187,6 +265,60 @@ class MessageBridge:
             
         except Exception as e:
             logger.error(f"Failed to forward Telegram message from topic {topic_id}: {e}")
+            
+    async def edit_telegram_message_in_discord(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Edit corresponding Discord message when Telegram message is edited"""
+        if not update.edited_message or not update.edited_message.message_thread_id:
+            return
+            
+        # Only process messages in the topics channel
+        if update.edited_message.chat_id != TOPICS_CHANNEL_ID:
+            return
+            
+        try:
+            # Find the corresponding Discord message
+            message_mapping = messages_collection.find_one({
+                "telegram_message_id": update.edited_message.message_id,
+                "direction": "telegram_to_discord"
+            })
+            
+            if not message_mapping:
+                logger.warning(f"No Discord message found for edited Telegram message {update.edited_message.message_id}")
+                return
+                
+            # Get the Discord message and edit it
+            topic_id = update.edited_message.message_thread_id
+            mapping = await self.get_discord_user_from_topic(topic_id)
+            if not mapping:
+                return
+                
+            discord_user_id = mapping["discord_user_id"]
+            discord_user = await discord_client.fetch_user(discord_user_id)
+            
+            if discord_user and discord_user.dm_channel:
+                try:
+                    discord_msg = await discord_user.dm_channel.fetch_message(message_mapping["discord_message_id"])
+                    new_content = f"{update.edited_message.text or '[Media/File]'} *[edited]*"
+                    await discord_msg.edit(content=new_content)
+                    
+                    # Update the database record
+                    messages_collection.update_one(
+                        {"_id": message_mapping["_id"]},
+                        {
+                            "$set": {
+                                "message_content": update.edited_message.text or '[Media/File]',
+                                "last_edited": datetime.utcnow()
+                            }
+                        }
+                    )
+                    
+                    logger.info(f"Edited Discord message {message_mapping['discord_message_id']} for Telegram edit")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to edit Discord message: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Failed to edit Discord message for Telegram edit: {e}")
 
 # Initialize bridge
 bridge = MessageBridge()
@@ -211,10 +343,28 @@ async def on_message(message: discord.Message):
     if isinstance(message.channel, discord.DMChannel):
         await bridge.forward_discord_to_telegram(message)
 
+@discord_client.event
+async def on_message_edit(before: discord.Message, after: discord.Message):
+    # Ignore messages from the bot itself
+    if after.author == discord_client.user:
+        return
+    
+    # Ignore messages sent in Discord servers (only process DMs)
+    if after.guild is not None:
+        return
+    
+    # Only process DM edits
+    if isinstance(after.channel, discord.DMChannel):
+        await bridge.edit_discord_message_in_telegram(before, after)
+
 # Telegram handlers
 async def handle_telegram_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming Telegram messages"""
     await bridge.forward_telegram_to_discord(update, context)
+
+async def handle_telegram_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle edited Telegram messages"""
+    await bridge.edit_telegram_message_in_discord(update, context)
 
 def run_telegram_bot():
     """Run Telegram bot in a separate thread"""
@@ -224,6 +374,13 @@ def run_telegram_bot():
         handle_telegram_message
     )
     telegram_app.add_handler(message_handler)
+    
+    # Add edit handler for edited messages
+    edit_handler = MessageHandler(
+        filters.UpdateType.EDITED_MESSAGE,
+        handle_telegram_edit
+    )
+    telegram_app.add_handler(edit_handler)
     
     # Start Telegram bot
     print("Starting Telegram bot...")

@@ -368,6 +368,10 @@ async def handle_telegram_edit(update: Update, context: ContextTypes.DEFAULT_TYP
 
 def run_telegram_bot():
     """Run Telegram bot in a separate thread"""
+    # Create new event loop for this thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     # Add message handler for topic messages
     message_handler = MessageHandler(
         filters.TEXT & ~filters.COMMAND,
@@ -394,8 +398,8 @@ def main():
         telegram_thread.start()
         
         print("Starting Discord selfbot...")
-        # Start Discord selfbot
-        discord_client.run(DISCORD_TOKEN, bot=False)  # bot=False for selfbot
+        # Start Discord selfbot (remove bot=False parameter)
+        discord_client.run(DISCORD_TOKEN)
         
     except Exception as e:
         logger.error(f"Failed to start bots: {e}")

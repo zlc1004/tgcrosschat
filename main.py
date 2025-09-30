@@ -247,6 +247,8 @@ class MessageBridge:
                 logger.error(f"Could not find Discord user {discord_user_id}")
                 return
             
+            logger.info(f"Found Discord user: {discord_user.name}#{discord_user.discriminator} (ID: {discord_user.id})")
+            
             # Check if this is a reply to another message
             reference = None
             if update.message.reply_to_message:
@@ -265,6 +267,16 @@ class MessageBridge:
                 
             # Send message to Discord DM
             content = update.message.text or "[Media/File]"
+            
+            logger.info(f"Attempting to send message to {discord_user.name}: '{content}'")
+            
+            # Try to create DM channel first
+            try:
+                dm_channel = discord_user.dm_channel or await discord_user.create_dm()
+                logger.info(f"DM channel created/found: {dm_channel.id}")
+            except Exception as e:
+                logger.error(f"Failed to create DM channel with {discord_user.name}: {e}")
+                return
             
             if reference:
                 discord_msg = await reference.reply(content)
@@ -290,6 +302,13 @@ class MessageBridge:
             
         except Exception as e:
             logger.error(f"Failed to send Discord message: {e}")
+            # Log more details about the error
+            if hasattr(e, 'status'):
+                logger.error(f"HTTP Status: {e.status}")
+            if hasattr(e, 'code'):
+                logger.error(f"Error Code: {e.code}")
+            if hasattr(e, 'text'):
+                logger.error(f"Error Text: {e.text}")
             
     async def edit_telegram_message_in_discord(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Edit corresponding Discord message when Telegram message is edited"""

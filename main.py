@@ -253,8 +253,7 @@ class MessageBridge:
             
             # Create DM channel
             try:
-                # dm_channel = await discord_user.create_dm()
-                dm_channel = discord_client.ge
+                dm_channel = await discord_client.get_channel(discord_user.id)
                 logger.info(f"DM channel created: {dm_channel.id}")
             except Exception as e:
                 logger.error(f"Failed to create DM channel with {discord_user.name}: {e}")

@@ -1,6 +1,7 @@
 import logging
 import os
 import discord
+import requests
 from dotenv import load_dotenv
 from telegram import Bot, Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -222,49 +223,23 @@ class MessageBridge:
                 
             discord_user_id = mapping["discord_user_id"]
             
-            # Use run_coroutine_threadsafe to call Discord functions
-            if discord_loop is None:
-                logger.error("Discord event loop not available")
-                return
-                
-            future = asyncio.run_coroutine_threadsafe(
-                self._send_discord_message(discord_user_id, update, topic_id),
-                discord_loop
-            )
-            
-            # Wait for the result with timeout
-            try:
-                future.result(timeout=10)  # 10 second timeout
-            except Exception as e:
-                logger.error(f"Failed to send Discord message: {e}")
+            # Send Discord message using HTTP API (no longer needs Discord event loop)
+            await self._send_discord_message(discord_user_id, update, topic_id)
             
         except Exception as e:
             logger.error(f"Failed to forward Telegram message from topic {topic_id}: {e}")
             
     async def _send_discord_message(self, discord_user_id: int, update: Update, topic_id: int):
-        """Helper method to send Discord message in Discord's event loop"""
-        discord_user = None
+        """Helper method to send Discord message using direct HTTP requests"""
         try:
-            # Get Discord user
-            discord_user = await discord_client.fetch_user(discord_user_id)
-            if not discord_user:
-                logger.error(f"Could not find Discord user {discord_user_id}")
-                return
-            
-            logger.info(f"Found Discord user: {discord_user.name}#{discord_user.discriminator} (ID: {discord_user.id})")
-            
-            # Create DM channel
-            try:
-                dm_channel = discord_user.dm_channel
-                if dm_channel is None:
-                    dm_channel = await discord_user.create_dm()
-                logger.info(f"DM channel created: {dm_channel.id}")
-            except Exception as e:
-                logger.error(f"Failed to create DM channel with {discord_user.name}: {e}")
+            # First, create or get DM channel using HTTP API
+            dm_channel_id = await self._get_or_create_dm_channel(discord_user_id)
+            if not dm_channel_id:
+                logger.error(f"Could not create DM channel with Discord user {discord_user_id}")
                 return
             
             # Check if this is a reply to another message
-            reference = None
+            message_reference = None
             if update.message.reply_to_message:
                 # Find the corresponding Discord message
                 reply_mapping = messages_collection.find_one({
@@ -272,85 +247,99 @@ class MessageBridge:
                     "direction": "telegram_to_discord"
                 })
                 if reply_mapping and reply_mapping.get("discord_message_id"):
-                    # Create a message reference for Discord
-                    try:
-                        original_message = await dm_channel.fetch_message(reply_mapping["discord_message_id"])
-                        reference = original_message
-                    except:
-                        pass  # If we can't fetch the original message, just send without reference
+                    message_reference = {
+                        "message_id": str(reply_mapping["discord_message_id"])
+                    }
                 
-            # Send message to Discord DM
+            # Send message to Discord DM using HTTP API
             content = update.message.text or "[Media/File]"
             
-            logger.info(f"Attempting to send message to {discord_user.name}: '{content}'")
+            logger.info(f"Attempting to send message to Discord user {discord_user_id}: '{content}'")
             
-            if reference:
-                discord_msg = await reference.reply(content)
-            else:
-                discord_msg = await dm_channel.send(content)
-            
-            # Store message mapping
-            message_doc = {
-                "message_content": content,
-                "discord_channel_id": discord_user_id,  # For DMs, channel ID = user ID
-                "discord_message_id": discord_msg.id,
-                "telegram_channel_id": TOPICS_CHANNEL_ID,
-                "telegram_topic_id": topic_id,
-                "telegram_message_id": update.message.message_id,
-                "direction": "telegram_to_discord",
-                "timestamp": datetime.utcnow(),
-                "is_reply": reference is not None,
-                "reply_to_discord_id": reference.id if reference else None
+            # Prepare the request payload
+            payload = {
+                "content": content
             }
-            messages_collection.insert_one(message_doc)
             
-            logger.info(f"Forwarded Telegram message from topic {topic_id} to Discord user {discord_user_id}")
+            if message_reference:
+                payload["message_reference"] = message_reference
             
-        except Exception as e:
-            logger.error(f"Failed to send Discord message: {e}")
-            logger.error(f"Exception type: {type(e).__name__}")
+            # Send the message
+            headers = {
+                "Authorization": DISCORD_TOKEN,  # For selfbots, no "Bot" prefix
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+            }
             
-            # Log comprehensive debug info
-            logger.debug(f"Discord user ID: {discord_user_id}")
-            if discord_user:
-                logger.debug(f"Discord user: {discord_user.name}#{discord_user.discriminator} (ID: {discord_user.id})")
+            response = requests.post(
+                f"https://discord.com/api/v9/channels/{dm_channel_id}/messages",
+                json=payload,
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                discord_msg_data = response.json()
+                discord_msg_id = discord_msg_data["id"]
+                
+                # Store message mapping
+                message_doc = {
+                    "message_content": content,
+                    "discord_channel_id": discord_user_id,  # For DMs, channel ID = user ID
+                    "discord_message_id": discord_msg_id,
+                    "telegram_channel_id": TOPICS_CHANNEL_ID,
+                    "telegram_topic_id": topic_id,
+                    "telegram_message_id": update.message.message_id,
+                    "direction": "telegram_to_discord",
+                    "timestamp": datetime.utcnow(),
+                    "is_reply": message_reference is not None,
+                    "reply_to_discord_id": message_reference["message_id"] if message_reference else None
+                }
+                messages_collection.insert_one(message_doc)
+                
+                logger.info(f"Successfully sent message to Discord user {discord_user_id}")
             else:
-                logger.debug(f"Discord user: NOT FOUND")
+                logger.error(f"Failed to send Discord message. Status: {response.status_code}, Response: {response.text}")
+                
+        except Exception as e:
+            logger.error(f"Failed to send Discord message using HTTP API: {e}")
+            logger.debug(f"Discord user ID: {discord_user_id}")
             logger.debug(f"Telegram topic ID: {topic_id}")
-            logger.debug(f"Telegram message ID: {update.message.message_id}")
             logger.debug(f"Message content: '{update.message.text or '[Media/File]'}'")
-            logger.debug(f"From Telegram user: {update.message.from_user.username} (ID: {update.message.from_user.id})")
             
-            # Log more details about the Discord error
-            if hasattr(e, 'status'):
-                logger.error(f"HTTP Status: {e.status}")
-            if hasattr(e, 'code'):
-                logger.error(f"Error Code: {e.code}")
-            if hasattr(e, 'text'):
-                logger.error(f"Error Text: {e.text}")
-            if hasattr(e, 'response'):
-                logger.error(f"Response: {e.response}")
-            if hasattr(e, 'args'):
-                logger.error(f"Error Args: {e.args}")
-                
-            # Check if it's a specific Discord error
-            import discord
-            if isinstance(e, discord.HTTPException):
-                logger.error(f"Discord HTTP Exception - Status: {e.status}, Code: {e.code}")
-                logger.error(f"Discord Error Response: {e.response}")
-            elif isinstance(e, discord.Forbidden):
-                logger.error(f"Discord Forbidden Error - This usually means:")
-                logger.error(f"  - User has DMs disabled")
-                logger.error(f"  - User blocked the bot")
-                logger.error(f"  - Missing permissions")
-            elif isinstance(e, discord.NotFound):
-                logger.error(f"Discord Not Found - User or channel doesn't exist")
-            elif isinstance(e, discord.DiscordServerError):
-                logger.error(f"Discord Server Error - Internal Discord issue")
-                
-            # Print full traceback for debugging
             import traceback
             logger.error(f"Full traceback:\n{traceback.format_exc()}")
+    
+    async def _get_or_create_dm_channel(self, discord_user_id: int) -> str:
+        """Create or get DM channel with a Discord user using HTTP API"""
+        try:
+            headers = {
+                "Authorization": DISCORD_TOKEN,  # For selfbots, no "Bot" prefix
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+            }
+            
+            payload = {
+                "recipient_id": str(discord_user_id)
+            }
+            
+            response = requests.post(
+                "https://discord.com/api/v9/users/@me/channels",
+                json=payload,
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                channel_data = response.json()
+                channel_id = channel_data["id"]
+                logger.info(f"Created/retrieved DM channel {channel_id} with user {discord_user_id}")
+                return channel_id
+            else:
+                logger.error(f"Failed to create DM channel. Status: {response.status_code}, Response: {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Failed to create DM channel with user {discord_user_id}: {e}")
+            return None
             
     async def edit_telegram_message_in_discord(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Edit corresponding Discord message when Telegram message is edited"""

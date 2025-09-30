@@ -366,12 +366,16 @@ async def handle_telegram_edit(update: Update, context: ContextTypes.DEFAULT_TYP
     """Handle edited Telegram messages"""
     await bridge.edit_telegram_message_in_discord(update, context)
 
+def run_discord_bot():
+    """Run Discord bot in a separate thread"""
+    print("Starting Discord selfbot...")
+    try:
+        discord_client.run(DISCORD_TOKEN)
+    except Exception as e:
+        logger.error(f"Failed to start Discord bot: {e}")
+
 def run_telegram_bot():
-    """Run Telegram bot in a separate thread"""
-    # Create new event loop for this thread
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
+    """Run Telegram bot in main thread"""
     # Add message handler for topic messages
     message_handler = MessageHandler(
         filters.TEXT & ~filters.COMMAND,
@@ -393,13 +397,12 @@ def run_telegram_bot():
 def main():
     """Start both bots"""
     try:
-        # Start Telegram bot in a separate thread
-        telegram_thread = threading.Thread(target=run_telegram_bot, daemon=True)
-        telegram_thread.start()
+        # Start Discord bot in a separate thread
+        discord_thread = threading.Thread(target=run_discord_bot, daemon=True)
+        discord_thread.start()
         
-        print("Starting Discord selfbot...")
-        # Start Discord selfbot (remove bot=False parameter)
-        discord_client.run(DISCORD_TOKEN)
+        # Run Telegram bot in main thread
+        run_telegram_bot()
         
     except Exception as e:
         logger.error(f"Failed to start bots: {e}")

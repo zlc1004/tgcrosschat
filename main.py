@@ -42,6 +42,9 @@ messages_collection = db.messages  # message sync tracking
 discord_client = discord.Client()
 telegram_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+# Store Discord event loop for cross-thread calls
+discord_loop = None
+
 class MessageBridge:
     def __init__(self):
         self.telegram_bot = telegram_app.bot
@@ -216,6 +219,28 @@ class MessageBridge:
                 
             discord_user_id = mapping["discord_user_id"]
             
+            # Use run_coroutine_threadsafe to call Discord functions
+            if discord_loop is None:
+                logger.error("Discord event loop not available")
+                return
+                
+            future = asyncio.run_coroutine_threadsafe(
+                self._send_discord_message(discord_user_id, update, topic_id),
+                discord_loop
+            )
+            
+            # Wait for the result with timeout
+            try:
+                future.result(timeout=10)  # 10 second timeout
+            except Exception as e:
+                logger.error(f"Failed to send Discord message: {e}")
+            
+        except Exception as e:
+            logger.error(f"Failed to forward Telegram message from topic {topic_id}: {e}")
+            
+    async def _send_discord_message(self, discord_user_id: int, update: Update, topic_id: int):
+        """Helper method to send Discord message in Discord's event loop"""
+        try:
             # Get Discord user
             discord_user = await discord_client.fetch_user(discord_user_id)
             if not discord_user:
@@ -264,7 +289,7 @@ class MessageBridge:
             logger.info(f"Forwarded Telegram message from topic {topic_id} to Discord user {discord_user_id}")
             
         except Exception as e:
-            logger.error(f"Failed to forward Telegram message from topic {topic_id}: {e}")
+            logger.error(f"Failed to send Discord message: {e}")
             
     async def edit_telegram_message_in_discord(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Edit corresponding Discord message when Telegram message is edited"""
@@ -286,6 +311,28 @@ class MessageBridge:
                 logger.warning(f"No Discord message found for edited Telegram message {update.edited_message.message_id}")
                 return
                 
+            # Use run_coroutine_threadsafe to call Discord functions
+            if discord_loop is None:
+                logger.error("Discord event loop not available")
+                return
+                
+            future = asyncio.run_coroutine_threadsafe(
+                self._edit_discord_message(update, message_mapping),
+                discord_loop
+            )
+            
+            # Wait for the result with timeout
+            try:
+                future.result(timeout=10)  # 10 second timeout
+            except Exception as e:
+                logger.error(f"Failed to edit Discord message: {e}")
+                
+        except Exception as e:
+            logger.error(f"Failed to edit Discord message for Telegram edit: {e}")
+            
+    async def _edit_discord_message(self, update: Update, message_mapping: dict):
+        """Helper method to edit Discord message in Discord's event loop"""
+        try:
             # Get the Discord message and edit it
             topic_id = update.edited_message.message_thread_id
             mapping = await self.get_discord_user_from_topic(topic_id)
@@ -318,7 +365,7 @@ class MessageBridge:
                     logger.error(f"Failed to edit Discord message: {e}")
                     
         except Exception as e:
-            logger.error(f"Failed to edit Discord message for Telegram edit: {e}")
+            logger.error(f"Failed to edit Discord message: {e}")
 
 # Initialize bridge
 bridge = MessageBridge()
@@ -326,6 +373,8 @@ bridge = MessageBridge()
 # Discord events
 @discord_client.event
 async def on_ready():
+    global discord_loop
+    discord_loop = asyncio.get_event_loop()
     print(f"Discord selfbot logged in as {discord_client.user} (ID: {discord_client.user.id})")
     print("------")
 

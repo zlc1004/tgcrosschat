@@ -120,7 +120,7 @@ class MessageBridge:
             # Store message mapping
             message_doc = {
                 "message_content": message.content,
-                "discord_channel_id": message.channel.id,
+                "discord_channel_id": message.author.id,  # For DMs, channel ID = user ID
                 "discord_message_id": message.id,
                 "telegram_channel_id": TOPICS_CHANNEL_ID,
                 "telegram_topic_id": topic_id,
@@ -253,7 +253,8 @@ class MessageBridge:
             
             # Create DM channel
             try:
-                dm_channel = await discord_user.create_dm()
+                # dm_channel = await discord_user.create_dm()
+                dm_channel = discord_client.ge
                 logger.info(f"DM channel created: {dm_channel.id}")
             except Exception as e:
                 logger.error(f"Failed to create DM channel with {discord_user.name}: {e}")
@@ -288,7 +289,7 @@ class MessageBridge:
             # Store message mapping
             message_doc = {
                 "message_content": content,
-                "discord_channel_id": dm_channel.id,
+                "discord_channel_id": discord_user_id,  # For DMs, channel ID = user ID
                 "discord_message_id": discord_msg.id,
                 "telegram_channel_id": TOPICS_CHANNEL_ID,
                 "telegram_topic_id": topic_id,

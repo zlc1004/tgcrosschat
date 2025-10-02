@@ -6,6 +6,10 @@ services:
       context: .
     env_file:
       - .env
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TOPICS_CHANNEL_ID=${TOPICS_CHANNEL_ID}
     restart: unless-stopped
     depends_on:
       - mongo

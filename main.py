@@ -10,6 +10,7 @@ import asyncio
 from pymongo import MongoClient
 from datetime import datetime
 import threading
+import json
 
 # Load environment variables
 load_dotenv()
@@ -165,20 +166,41 @@ class MessageBridge:
 
             # Handle attachments
             for attachment in message.attachments:
-                if attachment.content_type and attachment.content_type.startswith("image/"):
-                    await self.telegram_bot.send_photo(
-                        chat_id=TOPICS_CHANNEL_ID,
-                        message_thread_id=topic_id,
-                        photo=attachment.url,
-                        caption=f"Image from {user_display_name}"
-                    )
-                else:
-                    await self.telegram_bot.send_document(
-                        chat_id=TOPICS_CHANNEL_ID,
-                        message_thread_id=topic_id,
-                        document=attachment.url,
-                        caption=f"File from {user_display_name}: {attachment.filename}"
-                    )
+                try:
+                    if attachment.content_type and attachment.content_type.startswith("image/"):
+                        telegram_attachment = await self.telegram_bot.send_photo(
+                            chat_id=TOPICS_CHANNEL_ID,
+                            message_thread_id=topic_id,
+                            photo=attachment.url,
+                            caption=f"Image from {user_display_name}"
+                        )
+                    else:
+                        telegram_attachment = await self.telegram_bot.send_document(
+                            chat_id=TOPICS_CHANNEL_ID,
+                            message_thread_id=topic_id,
+                            document=attachment.url,
+                            caption=f"File from {user_display_name}: {attachment.filename}"
+                        )
+
+                    # Store attachment mapping
+                    attachment_doc = {
+                        "message_content": f"[Attachment: {attachment.filename}]",
+                        "discord_channel_id": message.author.id,
+                        "discord_message_id": message.id,
+                        "telegram_channel_id": TOPICS_CHANNEL_ID,
+                        "telegram_topic_id": topic_id,
+                        "telegram_message_id": telegram_attachment.message_id,
+                        "direction": "discord_to_telegram",
+                        "timestamp": datetime.utcnow(),
+                        "is_reply": False,
+                        "has_attachment": True,
+                        "attachment_filename": attachment.filename,
+                        "attachment_url": attachment.url
+                    }
+                    messages_collection.insert_one(attachment_doc)
+
+                except Exception as e:
+                    logger.error(f"Failed to send attachment {attachment.filename}: {e}")
 
             logger.info(f"Forwarded DM from {username} to topic {topic_id}")
 
@@ -280,10 +302,94 @@ class MessageBridge:
                         "message_id": str(reply_mapping["discord_message_id"])
                     }
 
-            # Send message to Discord DM using HTTP API
-            content = update.message.text or "[Media/File]"
+            # Handle different message types
+            content = update.message.text or ""
 
-            logger.info(f"Attempting to send message to Discord user {discord_user_id}: '{content}'")
+            # Handle images and documents
+            if update.message.photo:
+                # Get the largest photo
+                photo = update.message.photo[-1]
+                file_info = await self.telegram_bot.get_file(photo.file_id)
+                file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
+                content = content or "[Image]"
+                discord_msg_id = await self._send_discord_file(discord_user_id, dm_channel_id, content, file_url, "image.jpg", message_reference)
+
+                if discord_msg_id:
+                    # Store message mapping for image
+                    message_doc = {
+                        "message_content": content,
+                        "discord_channel_id": discord_user_id,
+                        "discord_message_id": discord_msg_id,
+                        "telegram_channel_id": TOPICS_CHANNEL_ID,
+                        "telegram_topic_id": topic_id,
+                        "telegram_message_id": update.message.message_id,
+                        "direction": "telegram_to_discord",
+                        "timestamp": datetime.utcnow(),
+                        "is_reply": message_reference is not None,
+                        "reply_to_discord_id": message_reference["message_id"] if message_reference else None,
+                        "has_attachment": True,
+                        "attachment_filename": "image.jpg"
+                    }
+                    messages_collection.insert_one(message_doc)
+                return
+
+            elif update.message.document:
+                doc = update.message.document
+                file_info = await self.telegram_bot.get_file(doc.file_id)
+                file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
+                content = content or f"[Document: {doc.file_name}]"
+                discord_msg_id = await self._send_discord_file(discord_user_id, dm_channel_id, content, file_url, doc.file_name, message_reference)
+
+                if discord_msg_id:
+                    # Store message mapping for document
+                    message_doc = {
+                        "message_content": content,
+                        "discord_channel_id": discord_user_id,
+                        "discord_message_id": discord_msg_id,
+                        "telegram_channel_id": TOPICS_CHANNEL_ID,
+                        "telegram_topic_id": topic_id,
+                        "telegram_message_id": update.message.message_id,
+                        "direction": "telegram_to_discord",
+                        "timestamp": datetime.utcnow(),
+                        "is_reply": message_reference is not None,
+                        "reply_to_discord_id": message_reference["message_id"] if message_reference else None,
+                        "has_attachment": True,
+                        "attachment_filename": doc.file_name
+                    }
+                    messages_collection.insert_one(message_doc)
+                return
+
+            elif update.message.video:
+                video = update.message.video
+                file_info = await self.telegram_bot.get_file(video.file_id)
+                file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
+                content = content or "[Video]"
+                discord_msg_id = await self._send_discord_file(discord_user_id, dm_channel_id, content, file_url, "video.mp4", message_reference)
+
+                if discord_msg_id:
+                    # Store message mapping for video
+                    message_doc = {
+                        "message_content": content,
+                        "discord_channel_id": discord_user_id,
+                        "discord_message_id": discord_msg_id,
+                        "telegram_channel_id": TOPICS_CHANNEL_ID,
+                        "telegram_topic_id": topic_id,
+                        "telegram_message_id": update.message.message_id,
+                        "direction": "telegram_to_discord",
+                        "timestamp": datetime.utcnow(),
+                        "is_reply": message_reference is not None,
+                        "reply_to_discord_id": message_reference["message_id"] if message_reference else None,
+                        "has_attachment": True,
+                        "attachment_filename": "video.mp4"
+                    }
+                    messages_collection.insert_one(message_doc)
+                return
+
+            # Handle text messages
+            if not content:
+                content = "[Empty message]"
+
+            logger.info(f"Attempting to send text message to Discord user {discord_user_id}: '{content}'")
 
             # Prepare the request payload
             payload = {
@@ -337,6 +443,59 @@ class MessageBridge:
 
             import traceback
             logger.error(f"Full traceback:\n{traceback.format_exc()}")
+
+    async def _send_discord_file(self, discord_user_id: int, dm_channel_id: str, content: str, file_url: str, filename: str, message_reference: dict = None):
+        """Send file to Discord using multipart form data"""
+        try:
+            # Download the file
+            file_response = requests.get(file_url)
+            if file_response.status_code != 200:
+                logger.error(f"Failed to download file from Telegram: {file_response.status_code}")
+                return
+
+            # Prepare multipart form data
+            files = {
+                'files[0]': (filename, file_response.content)
+            }
+
+            data = {
+                'content': content,
+                'payload_json': {
+                    'content': content
+                }
+            }
+
+            if message_reference:
+                data['payload_json']['message_reference'] = message_reference
+
+            # Convert payload_json to string
+            data['payload_json'] = json.dumps(data['payload_json'])
+
+            headers = {
+                "Authorization": DISCORD_TOKEN,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+            }
+
+            response = requests.post(
+                f"https://discord.com/api/v9/channels/{dm_channel_id}/messages",
+                files=files,
+                data=data,
+                headers=headers
+            )
+
+            if response.status_code == 200:
+                discord_msg_data = response.json()
+                discord_msg_id = discord_msg_data["id"]
+
+                # Message tracking will be handled by the caller
+
+                logger.info(f"Successfully sent file {filename} to Discord user {discord_user_id}")
+                return discord_msg_id
+            else:
+                logger.error(f"Failed to send Discord file. Status: {response.status_code}, Response: {response.text}")
+
+        except Exception as e:
+            logger.error(f"Failed to send file to Discord: {e}")
 
     async def _get_or_create_dm_channel(self, discord_user_id: int) -> str:
         """Create or get DM channel with a Discord user using HTTP API"""

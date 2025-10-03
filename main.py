@@ -473,6 +473,20 @@ async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ping command"""
     await update.message.reply_text("pong")
 
+async def data_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /data command - shows channel and topic info"""
+    channel_id = update.message.chat_id
+    topic_id = update.message.message_thread_id
+
+    response = f"Channel ID: `{channel_id}`"
+
+    if topic_id:
+        response += f"\nTopic ID: `{topic_id}`"
+    else:
+        response += "\nNot in a topic"
+
+    await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
+
 def run_discord_bot():
     """Run Discord bot in a separate thread"""
     print("Starting Discord selfbot...")
@@ -486,6 +500,10 @@ def run_telegram_bot():
     # Add ping command handler
     ping_handler = CommandHandler("ping", ping_command)
     telegram_app.add_handler(ping_handler)
+
+    # Add data command handler
+    data_handler = CommandHandler("data", data_command)
+    telegram_app.add_handler(data_handler)
 
     # Add message handler for topic messages
     message_handler = MessageHandler(

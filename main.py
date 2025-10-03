@@ -128,10 +128,10 @@ class MessageBridge:
             # Check if this is a reply to another message
             reply_to_message_id = None
             if message.reference and message.reference.message_id:
-                # Find the corresponding Telegram message
+                # Find the corresponding Telegram message (check both directions)
                 reply_mapping = messages_collection.find_one({
                     "discord_message_id": message.reference.message_id,
-                    "direction": "discord_to_telegram"
+                    "direction": {"$in": ["discord_to_telegram", "telegram_to_discord"]}
                 })
                 if reply_mapping:
                     reply_to_message_id = reply_mapping["telegram_message_id"]
@@ -270,10 +270,10 @@ class MessageBridge:
             # Check if this is a reply to another message
             message_reference = None
             if update.message.reply_to_message:
-                # Find the corresponding Discord message
+                # Find the corresponding Discord message (look for the original Discord message that was forwarded TO Telegram)
                 reply_mapping = messages_collection.find_one({
                     "telegram_message_id": update.message.reply_to_message.message_id,
-                    "direction": "telegram_to_discord"
+                    "direction": "discord_to_telegram"
                 })
                 if reply_mapping and reply_mapping.get("discord_message_id"):
                     message_reference = {

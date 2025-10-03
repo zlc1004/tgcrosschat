@@ -677,19 +677,16 @@ class MessageBridge:
 
             # Handle different message types
             content = update.message.text or ""
-            user_name = update.message.from_user.first_name
-            if update.message.from_user.username:
-                user_name += f" (@{update.message.from_user.username})"
 
-            # Add Telegram user context
-            full_content = f"**[Telegram]** {user_name}: {content}"
+            # Send just the content without Telegram header
+            full_content = content
 
             # Handle media (simplified for channels)
             if update.message.photo or update.message.document or update.message.video:
-                full_content = f"**[Telegram]** {user_name}: [Media - check Telegram for full content]"
+                full_content = "[Media - check Telegram for full content]"
 
             if not full_content.strip():
-                full_content = f"**[Telegram]** {user_name}: [Empty message]"
+                full_content = "[Empty message]"
 
             logger.info(f"Attempting to send message to Discord channel {discord_channel_id}: '{full_content}'")
 
@@ -730,8 +727,7 @@ class MessageBridge:
                     "timestamp": datetime.utcnow(),
                     "is_reply": message_reference is not None,
                     "reply_to_discord_id": message_reference["message_id"] if message_reference else None,
-                    "is_channel_message": True,
-                    "telegram_user": user_name
+                    "is_channel_message": True
                 }
                 messages_collection.insert_one(message_doc)
 
@@ -867,11 +863,7 @@ class MessageBridge:
     async def _edit_discord_channel_message(self, update: Update, message_mapping: dict):
         """Edit Discord channel message using HTTP API"""
         try:
-            user_name = update.edited_message.from_user.first_name
-            if update.edited_message.from_user.username:
-                user_name += f" (@{update.edited_message.from_user.username})"
-
-            new_content = f"**[Telegram]** {user_name} *[edited]*: {update.edited_message.text or '[Media/File]'}"
+            new_content = f"{update.edited_message.text or '[Media/File]'} *[edited]*"
 
             headers = {
                 "Authorization": DISCORD_TOKEN,

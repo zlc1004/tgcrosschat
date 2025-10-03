@@ -88,7 +88,7 @@ class MessageBridge:
     def __init__(self):
         self.telegram_bot = telegram_app.bot
 
-    async def get_or_create_topic(self, username: str, user_id: int) -> int:
+    async def get_or_create_topic(self, username: str, user_id: int, display_name: str = None) -> int:
         """Get existing topic ID for user or create a new one"""
         # Check if mapping exists
         mapping = mappings_collection.find_one({"discord_user_id": user_id})
@@ -96,10 +96,11 @@ class MessageBridge:
             return mapping["telegram_topic_id"]
 
         try:
-            # Create a new topic for this user
+            # Create a new topic for this user with display name and username
+            topic_name = f"DM with {display_name or username}({username})"
             topic = await self.telegram_bot.create_forum_topic(
                 chat_id=TOPICS_CHANNEL_ID,
-                name=f"DM with {username}"
+                name=topic_name
             )
 
             # Store mapping in database
@@ -231,7 +232,7 @@ class MessageBridge:
 
         try:
             # Get or create topic for this user
-            topic_id = await self.get_or_create_topic(username, user_id)
+            topic_id = await self.get_or_create_topic(username, user_id, user_display_name)
 
             # Check if this is a reply to another message
             reply_to_message_id = None
@@ -741,6 +742,52 @@ class MessageBridge:
         except Exception as e:
             logger.error(f"Failed to send Discord channel message: {e}")
 
+    async def _get_discord_channel_info(self, channel_id: int) -> dict:
+        """Get Discord channel and server information using HTTP API"""
+        try:
+            headers = {
+                "Authorization": DISCORD_TOKEN,
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+            }
+
+            # Get channel information
+            response = requests.get(
+                f"https://discord.com/api/v9/channels/{channel_id}",
+                headers=headers
+            )
+
+            if response.status_code == 200:
+                channel_data = response.json()
+                channel_name = channel_data.get("name", "unknown-channel")
+                guild_id = channel_data.get("guild_id")
+
+                if guild_id:
+                    # Get guild (server) information
+                    guild_response = requests.get(
+                        f"https://discord.com/api/v9/guilds/{guild_id}",
+                        headers=headers
+                    )
+
+                    if guild_response.status_code == 200:
+                        guild_data = guild_response.json()
+                        server_name = guild_data.get("name", "unknown-server")
+
+                        return {
+                            "name": channel_name,
+                            "guild_name": server_name,
+                            "guild_id": guild_id
+                        }
+
+                return {"name": channel_name, "guild_name": "unknown-server"}
+            else:
+                logger.error(f"Failed to get channel info. Status: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Failed to get Discord channel info for {channel_id}: {e}")
+            return None
+
     async def _get_or_create_dm_channel(self, discord_user_id: int) -> str:
         """Create or get DM channel with a Discord user using HTTP API"""
         try:
@@ -1000,13 +1047,20 @@ async def connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # Get channel info from Discord (if possible)
-        channel_name = f"Discord Channel {discord_channel_id}"
+        # Get channel info from Discord using HTTP API
+        channel_info = await bridge._get_discord_channel_info(discord_channel_id)
+        if channel_info:
+            channel_name = channel_info.get("name", "unknown-channel")
+            server_name = channel_info.get("guild_name", "unknown-server")
+            topic_name = f"{channel_name}({server_name})"
+        else:
+            topic_name = f"Channel-{discord_channel_id}(unknown-server)"
+            channel_name = f"Channel-{discord_channel_id}"
 
         # Create a new topic for this channel
         topic = await bridge.telegram_bot.create_forum_topic(
             chat_id=TOPICS_CHANNEL_ID,
-            name=f"🔗 {channel_name}"
+            name=topic_name
         )
 
         # Store mapping in database

@@ -1092,6 +1092,58 @@ async def connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.MARKDOWN
         )
 
+async def unlink_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /unlink command - removes Discord channel link when run in a linked topic"""
+    if not update.message.message_thread_id:
+        await update.message.reply_text(
+            "❌ This command must be run in a topic thread.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    topic_id = update.message.message_thread_id
+
+    try:
+        # Find the channel mapping for this topic
+        mapping = channel_mappings_collection.find_one({"telegram_topic_id": topic_id})
+
+        if not mapping:
+            await update.message.reply_text(
+                "❌ This topic is not linked to any Discord channel.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        discord_channel_id = mapping["discord_channel_id"]
+        channel_name = mapping.get("discord_channel_name", f"Channel-{discord_channel_id}")
+
+        # Remove the mapping from database
+        result = channel_mappings_collection.delete_one({"telegram_topic_id": topic_id})
+
+        if result.deleted_count > 0:
+            await update.message.reply_text(
+                f"✅ **Unlinked Successfully!**\n\n"
+                f"Discord Channel: `{channel_name}` (`{discord_channel_id}`)\n"
+                f"Telegram Topic: `{topic_id}`\n\n"
+                f"Messages will no longer be forwarded between this topic and the Discord channel.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+            logger.info(f"Removed channel mapping: Discord {discord_channel_id} -> Telegram topic {topic_id}")
+        else:
+            await update.message.reply_text(
+                "❌ Failed to remove the link. Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+    except Exception as e:
+        logger.error(f"Failed to unlink channel: {e}")
+        await update.message.reply_text(
+            f"❌ **Failed to unlink**\n\n"
+            f"Error: {str(e)}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
 def run_discord_bot():
     """Run Discord bot in a separate thread"""
     print("Starting Discord selfbot...")
@@ -1113,6 +1165,10 @@ def run_telegram_bot():
     # Add connect command handler
     connect_handler = CommandHandler("connect", connect_command)
     telegram_app.add_handler(connect_handler)
+
+    # Add unlink command handler
+    unlink_handler = CommandHandler("unlink", unlink_command)
+    telegram_app.add_handler(unlink_handler)
 
     # Add message handler for topic messages
     message_handler = MessageHandler(

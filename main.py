@@ -40,6 +40,35 @@ db = mongo_client.tgcrosschat
 mappings_collection = db.mappings  # topic_id <-> discord_user_id mappings
 messages_collection = db.messages  # message sync tracking
 
+def initialize_database():
+    """Initialize database and collections"""
+    try:
+        # Test connection
+        mongo_client.admin.command('ping')
+        logger.info("Successfully connected to MongoDB")
+
+        # Ensure database exists by creating collections if they don't exist
+        if 'mappings' not in db.list_collection_names():
+            db.create_collection('mappings')
+            logger.info("Created 'mappings' collection")
+
+        if 'messages' not in db.list_collection_names():
+            db.create_collection('messages')
+            logger.info("Created 'messages' collection")
+
+        # Create indexes for better performance
+        mappings_collection.create_index("discord_user_id", unique=True)
+        mappings_collection.create_index("telegram_topic_id", unique=True)
+        messages_collection.create_index("discord_message_id")
+        messages_collection.create_index("telegram_message_id")
+
+        logger.info("Database initialization completed successfully")
+        logger.info(f"Available collections: {db.list_collection_names()}")
+
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
+
 # Initialize bots
 discord_client = discord.Client()
 telegram_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -526,6 +555,9 @@ def run_telegram_bot():
 def main():
     """Start both bots"""
     try:
+        # Initialize database first
+        initialize_database()
+
         # Start Discord bot in a separate thread
         discord_thread = threading.Thread(target=run_discord_bot, daemon=True)
         discord_thread.start()

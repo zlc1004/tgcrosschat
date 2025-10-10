@@ -249,6 +249,105 @@ class InstanceManager:
         except subprocess.CalledProcessError:
             return "unknown"
 
+    def get_instance_details(self, docker_stack_name: str) -> dict:
+        """Get detailed Docker information for an instance"""
+        instance_path = self.instances_dir / docker_stack_name
+
+        if not instance_path.exists():
+            return {"error": "Instance directory not found"}
+
+        try:
+            # Get container information using docker compose ps with JSON format
+            compose_result = subprocess.run([
+                "docker", "compose", "-p", docker_stack_name, "ps", "--format", "json"
+            ], cwd=instance_path, capture_output=True, text=True)
+
+            details = {
+                "instance_path": str(instance_path),
+                "stack_name": docker_stack_name,
+                "containers": []
+            }
+
+            if compose_result.returncode == 0 and compose_result.stdout.strip():
+                # Parse JSON output
+                import json
+                for line in compose_result.stdout.strip().split('\n'):
+                    if line:
+                        try:
+                            container_info = json.loads(line)
+                            details["containers"].append(container_info)
+                        except json.JSONDecodeError:
+                            continue
+
+            # Get additional container details if containers exist
+            if details["containers"]:
+                for container in details["containers"]:
+                    container_id = container.get("ID", "")
+                    if container_id:
+                        # Get detailed container inspection
+                        inspect_result = subprocess.run([
+                            "docker", "inspect", container_id
+                        ], capture_output=True, text=True)
+
+                        if inspect_result.returncode == 0:
+                            try:
+                                import json
+                                inspect_data = json.loads(inspect_result.stdout)[0]
+
+                                # Add useful information
+                                container["detailed_info"] = {
+                                    "created": inspect_data.get("Created", ""),
+                                    "started_at": inspect_data.get("State", {}).get("StartedAt", ""),
+                                    "finished_at": inspect_data.get("State", {}).get("FinishedAt", ""),
+                                    "restart_count": inspect_data.get("RestartCount", 0),
+                                    "platform": inspect_data.get("Platform", ""),
+                                    "image": inspect_data.get("Config", {}).get("Image", ""),
+                                    "ports": inspect_data.get("NetworkSettings", {}).get("Ports", {}),
+                                    "mounts": [
+                                        {
+                                            "source": mount.get("Source", ""),
+                                            "destination": mount.get("Destination", ""),
+                                            "type": mount.get("Type", "")
+                                        }
+                                        for mount in inspect_data.get("Mounts", [])
+                                    ],
+                                    "memory_usage": self._get_container_stats(container_id)
+                                }
+                            except (json.JSONDecodeError, IndexError):
+                                container["detailed_info"] = {"error": "Failed to parse inspect data"}
+
+            return details
+
+        except subprocess.CalledProcessError as e:
+            return {"error": f"Docker command failed: {e}"}
+        except Exception as e:
+            return {"error": f"Unexpected error: {e}"}
+
+    def _get_container_stats(self, container_id: str) -> dict:
+        """Get container resource usage statistics"""
+        try:
+            stats_result = subprocess.run([
+                "docker", "stats", container_id, "--no-stream", "--format",
+                "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}"
+            ], capture_output=True, text=True, timeout=5)
+
+            if stats_result.returncode == 0:
+                lines = stats_result.stdout.strip().split('\n')
+                if len(lines) > 1:  # Skip header
+                    parts = lines[1].split('\t')
+                    if len(parts) >= 5:
+                        return {
+                            "cpu_usage": parts[1],
+                            "memory_usage": parts[2],
+                            "network_io": parts[3],
+                            "block_io": parts[4]
+                        }
+            return {"error": "Stats not available"}
+        except subprocess.TimeoutExpired:
+            return {"error": "Stats timeout"}
+        except Exception:
+            return {"error": "Stats unavailable"}
+
     def list_instances(self) -> List[Dict]:
         """List all instances"""
         return self.instances.copy()
@@ -349,6 +448,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             instance_index = int(query.data[15:])  # Remove "confirm_delete_" prefix
             await confirm_delete_instance(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("details_"):
+        try:
+            instance_index = int(query.data[8:])  # Remove "details_" prefix
+            await show_instance_details(update, context, instance_index)
         except ValueError:
             await query.edit_message_text(
                 "❌ **Invalid Action**\n\n"
@@ -487,6 +596,7 @@ async def manage_instance_callback(update: Update, context: ContextTypes.DEFAULT
         keyboard.append([InlineKeyboardButton("▶️ Resume Instance", callback_data=f"resume_{instance_index}")])
 
     keyboard.append([InlineKeyboardButton("🔄 Refresh Status", callback_data=f"manage_{instance_index}")])
+    keyboard.append([InlineKeyboardButton("📊 View Details", callback_data=f"details_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🗑️ Delete Instance", callback_data=f"delete_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🔙 Back to List", callback_data="stop_instance")])
 
@@ -612,6 +722,107 @@ async def delete_instance_action(update: Update, context: ContextTypes.DEFAULT_T
         f"• Remove all data and volumes\n"
         f"• Delete the instance directory\n\n"
         f"**This action cannot be undone!**",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def show_instance_details(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Show detailed Docker information for an instance"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    stack_name = instance['docker_stack_name']
+    short_id = stack_name[:8]
+
+    # Show loading message
+    await update.callback_query.edit_message_text(
+        f"📊 **Loading Details**\n\n"
+        f"Gathering Docker information for `{short_id}...`\n"
+        f"Please wait...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    # Get detailed information
+    details = instance_manager.get_instance_details(stack_name)
+
+    if "error" in details:
+        await update.callback_query.edit_message_text(
+            f"❌ **Error Getting Details**\n\n"
+            f"Instance: `{short_id}...`\n"
+            f"Error: {details['error']}\n\n"
+            f"The instance may not be running or accessible.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    # Format the details message
+    message = f"📊 **Instance Details**\n\n"
+    message += f"**Instance:** `{short_id}...`\n"
+    message += f"**Stack Name:** `{stack_name}`\n"
+    message += f"**Chat ID:** `{instance['chatid']}`\n"
+    message += f"**Topics Channel:** `{instance['topics_channel_id']}`\n\n"
+
+    # Container information
+    containers = details.get("containers", [])
+    if containers:
+        message += f"**🐳 Containers ({len(containers)}):**\n\n"
+
+        for i, container in enumerate(containers, 1):
+            name = container.get("Name", "Unknown")
+            service = container.get("Service", "Unknown")
+            state = container.get("State", "Unknown")
+            status = container.get("Status", "Unknown")
+
+            state_emoji = "🟢" if state == "running" else "🔴" if state == "exited" else "🟡"
+
+            message += f"**{i}. {service}**\n"
+            message += f"   Name: `{name}`\n"
+            message += f"   State: {state_emoji} {state}\n"
+            message += f"   Status: `{status}`\n"
+
+            # Add detailed info if available
+            detailed = container.get("detailed_info", {})
+            if detailed and "error" not in detailed:
+                if detailed.get("image"):
+                    message += f"   Image: `{detailed['image']}`\n"
+                if detailed.get("created"):
+                    created = detailed["created"][:19].replace("T", " ")  # Format timestamp
+                    message += f"   Created: `{created}`\n"
+                if detailed.get("restart_count", 0) > 0:
+                    message += f"   Restarts: `{detailed['restart_count']}`\n"
+
+                # Resource usage
+                memory_stats = detailed.get("memory_usage", {})
+                if memory_stats and "error" not in memory_stats:
+                    message += f"   CPU: `{memory_stats.get('cpu_usage', 'N/A')}`\n"
+                    message += f"   Memory: `{memory_stats.get('memory_usage', 'N/A')}`\n"
+                    message += f"   Network: `{memory_stats.get('network_io', 'N/A')}`\n"
+                    message += f"   Disk I/O: `{memory_stats.get('block_io', 'N/A')}`\n"
+
+            message += "\n"
+    else:
+        message += "**🐳 Containers:** None found\n\n"
+
+    # Truncate if message is too long (Telegram limit ~4096 characters)
+    if len(message) > 4000:
+        message = message[:3950] + "\n\n... (truncated)"
+
+    keyboard = [
+        [InlineKeyboardButton("🔄 Refresh Details", callback_data=f"details_{instance_index}")],
+        [InlineKeyboardButton("🔙 Back to Instance", callback_data=f"manage_{instance_index}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.callback_query.edit_message_text(
+        message,
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
     )
@@ -873,7 +1084,7 @@ def main():
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(conversation_handler)
     application.add_handler(CallbackQueryHandler(button_callback, pattern="^(list_instances|create_instance|stop_instance|help|back_to_menu)$"))
-    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(manage|pause|resume|delete|confirm_delete)_\d+$"))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(manage|pause|resume|delete|confirm_delete|details)_\d+$"))
     application.add_handler(CallbackQueryHandler(back_to_menu_callback, pattern="^back_to_menu$"))
 
     logger.info("TGCrossChat Manager Bot starting...")

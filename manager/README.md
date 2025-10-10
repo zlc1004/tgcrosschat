@@ -52,6 +52,11 @@ A Telegram bot-based management system for creating and managing multiple TGCros
 - **Manage Instances**: Individual instance control panel
   - **Pause/Resume**: Stop/start containers without losing data (`compose stop`/`compose up -d`)
   - **Refresh Status**: Update real-time status display
+  - **View Details**: Comprehensive Docker information including:
+    - Container states and status
+    - Resource usage (CPU, Memory, Network, Disk I/O)
+    - Image information and creation times
+    - Restart counts and detailed inspection data
   - **Delete**: Permanently remove instance and all data
   - Real-time status monitoring
 
@@ -101,3 +106,4 @@ manager/
 - Instance names are generated using SHA256 hash of chat_id + discord_token + telegram_token
 - All containers use unique project names to avoid conflicts
 - Stopping an instance removes all associated containers and data
+- Detailed instance information is gathered using Docker's JSON API (`docker compose ps --format json`, `docker inspect`, `docker stats`)

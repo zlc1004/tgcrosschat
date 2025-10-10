@@ -75,3 +75,6 @@ pnpm-debug.log*
 .pnpm-store/
 package-lock.json
 .config/
+
+manager/config.py
+manager/data.json

@@ -86,7 +86,8 @@ class InstanceManager:
             "discord_token": discord_token,
             "telegram_token": telegram_token,
             "topics_channel_id": topics_channel_id,
-            "docker_stack_name": instance_hash
+            "docker_stack_name": instance_hash,
+            "status": "running"
         }
 
         # Clone repository
@@ -144,8 +145,58 @@ class InstanceManager:
 
         return instance_data
 
+    def pause_instance(self, docker_stack_name: str) -> bool:
+        """Pause a TGCrossChat instance (stop containers but keep data)"""
+        instance_path = self.instances_dir / docker_stack_name
+
+        if not instance_path.exists():
+            return False
+
+        try:
+            # Stop Docker Compose (without removing volumes)
+            subprocess.run([
+                "docker", "compose", "-p", docker_stack_name, "stop"
+            ], cwd=instance_path, check=True, capture_output=True, text=True)
+
+            # Update instance status
+            for instance in self.instances:
+                if instance["docker_stack_name"] == docker_stack_name:
+                    instance["status"] = "stopped"
+                    break
+            self.save_data()
+
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to pause instance {docker_stack_name}: {e}")
+            return False
+
+    def resume_instance(self, docker_stack_name: str) -> bool:
+        """Resume a TGCrossChat instance"""
+        instance_path = self.instances_dir / docker_stack_name
+
+        if not instance_path.exists():
+            return False
+
+        try:
+            # Start Docker Compose
+            subprocess.run([
+                "docker", "compose", "-p", docker_stack_name, "up", "-d"
+            ], cwd=instance_path, check=True, capture_output=True, text=True)
+
+            # Update instance status
+            for instance in self.instances:
+                if instance["docker_stack_name"] == docker_stack_name:
+                    instance["status"] = "running"
+                    break
+            self.save_data()
+
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to resume instance {docker_stack_name}: {e}")
+            return False
+
     def stop_instance(self, docker_stack_name: str) -> bool:
-        """Stop and remove a TGCrossChat instance"""
+        """Stop and remove a TGCrossChat instance completely"""
         instance_path = self.instances_dir / docker_stack_name
 
         if not instance_path.exists():
@@ -168,6 +219,35 @@ class InstanceManager:
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to stop instance {docker_stack_name}: {e}")
             return False
+
+    def get_instance_status(self, docker_stack_name: str) -> str:
+        """Get the current status of an instance"""
+        instance_path = self.instances_dir / docker_stack_name
+
+        if not instance_path.exists():
+            return "missing"
+
+        try:
+            # Check if containers are running
+            result = subprocess.run([
+                "docker", "compose", "-p", docker_stack_name, "ps", "-q"
+            ], cwd=instance_path, capture_output=True, text=True)
+
+            if result.returncode == 0 and result.stdout.strip():
+                # Check if containers are actually running
+                container_ids = result.stdout.strip().split('\n')
+                for container_id in container_ids:
+                    if container_id:
+                        inspect_result = subprocess.run([
+                            "docker", "inspect", "-f", "{{.State.Running}}", container_id
+                        ], capture_output=True, text=True)
+                        if inspect_result.returncode == 0 and "true" in inspect_result.stdout:
+                            return "running"
+                return "stopped"
+            else:
+                return "stopped"
+        except subprocess.CalledProcessError:
+            return "unknown"
 
     def list_instances(self) -> List[Dict]:
         """List all instances"""
@@ -196,7 +276,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📋 List Instances", callback_data="list_instances")],
         [InlineKeyboardButton("➕ Create Instance", callback_data="create_instance")],
-        [InlineKeyboardButton("❌ Stop Instance", callback_data="stop_instance")],
+        [InlineKeyboardButton("⚙️ Manage Instances", callback_data="stop_instance")],
         [InlineKeyboardButton("ℹ️ Help", callback_data="help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -225,12 +305,59 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await stop_instance_callback(update, context)
     elif query.data == "help":
         await help_callback(update, context)
-    elif query.data.startswith("stop_"):
-        stack_name = query.data[5:]  # Remove "stop_" prefix
-        await confirm_stop_instance(update, context, stack_name)
+    elif query.data.startswith("manage_"):
+        try:
+            instance_index = int(query.data[7:])  # Remove "manage_" prefix
+            await manage_instance_callback(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Instance Selection**\n\n"
+                "Please try again or return to the main menu.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("pause_"):
+        try:
+            instance_index = int(query.data[6:])  # Remove "pause_" prefix
+            await pause_instance_action(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("resume_"):
+        try:
+            instance_index = int(query.data[7:])  # Remove "resume_" prefix
+            await resume_instance_action(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("delete_"):
+        try:
+            instance_index = int(query.data[7:])  # Remove "delete_" prefix
+            await delete_instance_action(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("confirm_delete_"):
+        try:
+            instance_index = int(query.data[15:])  # Remove "confirm_delete_" prefix
+            await confirm_delete_instance(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
 
 async def list_instances_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all instances"""
+    """List all instances with status"""
     instances = instance_manager.list_instances()
 
     if not instances:
@@ -240,11 +367,20 @@ async def list_instances_callback(update: Update, context: ContextTypes.DEFAULT_
         )
         return
 
-    message = "📋 **Active Instances**\n\n"
+    message = "📋 **Instance List**\n\n"
     for i, instance in enumerate(instances, 1):
-        message += f"**{i}.** Instance `{instance['docker_stack_name'][:8]}...`\n"
+        short_id = instance['docker_stack_name'][:8]
+
+        # Get real-time status
+        real_status = instance_manager.get_instance_status(instance['docker_stack_name'])
+        status_emoji = "🟢" if real_status == "running" else "🔴" if real_status == "stopped" else "🟡"
+
+        message += f"**{i}.** Instance `{short_id}...` {status_emoji}\n"
         message += f"   Chat ID: `{instance['chatid']}`\n"
-        message += f"   Topics Channel: `{instance['topics_channel_id']}`\n\n"
+        message += f"   Topics Channel: `{instance['topics_channel_id']}`\n"
+        message += f"   Status: {real_status.title()}\n\n"
+
+    message += "🟢 Running | 🔴 Stopped | 🟡 Unknown"
 
     keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -259,18 +395,6 @@ async def create_instance_callback(update: Update, context: ContextTypes.DEFAULT
     """Start instance creation process"""
     chat_id = str(update.effective_chat.id)
 
-    # Check if instance already exists for this chat
-    existing_instance = instance_manager.get_instance_by_chat_id(chat_id)
-    if existing_instance:
-        await update.callback_query.edit_message_text(
-            f"⚠️ An instance already exists for this chat!\n\n"
-            f"Instance ID: `{existing_instance['docker_stack_name'][:8]}...`\n"
-            f"Topics Channel: `{existing_instance['topics_channel_id']}`\n\n"
-            f"Please stop the existing instance first if you want to create a new one.",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-
     await update.callback_query.edit_message_text(
         "🔐 **Creating New Instance**\n\n"
         "Please provide your **Discord User Token**:\n\n"
@@ -284,49 +408,251 @@ async def create_instance_callback(update: Update, context: ContextTypes.DEFAULT
     return WAITING_DISCORD_TOKEN
 
 async def stop_instance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show instances that can be stopped"""
+    """Show instance management menu"""
     instances = instance_manager.list_instances()
 
     if not instances:
         await update.callback_query.edit_message_text(
-            "📭 No instances to stop.\n\n"
+            "📭 No instances found.\n\n"
             "Use /start to return to the main menu."
         )
         return
 
     keyboard = []
-    for instance in instances:
+    for i, instance in enumerate(instances):
         short_id = instance['docker_stack_name'][:8]
+        current_status = instance.get('status', 'unknown')
+
+        # Get real-time status
+        real_status = instance_manager.get_instance_status(instance['docker_stack_name'])
+
+        # Update stored status if different
+        if real_status != current_status:
+            instance['status'] = real_status
+            instance_manager.save_data()
+
+        status_emoji = "🟢" if real_status == "running" else "🔴" if real_status == "stopped" else "🟡"
+
         keyboard.append([InlineKeyboardButton(
-            f"❌ Stop {short_id}... (Chat: {instance['chatid']})",
-            callback_data=f"stop_{instance['docker_stack_name']}"
+            f"⚙️ Manage {short_id}... {status_emoji}",
+            callback_data=f"manage_{i}"
         )])
 
     keyboard.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.callback_query.edit_message_text(
-        "❌ **Stop Instance**\n\n"
-        "Select an instance to stop:",
+        "⚙️ **Manage Instances**\n\n"
+        "Select an instance to manage:\n"
+        "🟢 Running | 🔴 Stopped | 🟡 Unknown",
         reply_markup=reply_markup,
         parse_mode=ParseMode.MARKDOWN
     )
 
-async def confirm_stop_instance(update: Update, context: ContextTypes.DEFAULT_TYPE, stack_name: str):
-    """Confirm and stop instance"""
-    success = instance_manager.stop_instance(stack_name)
+async def manage_instance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Show controls for a specific instance"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    short_id = instance['docker_stack_name'][:8]
+    current_status = instance_manager.get_instance_status(instance['docker_stack_name'])
+
+    # Update stored status
+    instance['status'] = current_status
+    instance_manager.save_data()
+
+    status_emoji = "🟢" if current_status == "running" else "🔴" if current_status == "stopped" else "🟡"
+    status_text = current_status.title()
+
+    message = f"⚙️ **Instance Management**\n\n"
+    message += f"Instance: `{short_id}...`\n"
+    message += f"Chat ID: `{instance['chatid']}`\n"
+    message += f"Topics Channel: `{instance['topics_channel_id']}`\n"
+    message += f"Status: {status_emoji} {status_text}\n\n"
+    message += f"Choose an action:"
+
+    keyboard = []
+
+    if current_status == "running":
+        keyboard.append([InlineKeyboardButton("⏸️ Pause Instance", callback_data=f"pause_{instance_index}")])
+    elif current_status == "stopped":
+        keyboard.append([InlineKeyboardButton("▶️ Resume Instance", callback_data=f"resume_{instance_index}")])
+
+    keyboard.append([InlineKeyboardButton("🔄 Refresh Status", callback_data=f"manage_{instance_index}")])
+    keyboard.append([InlineKeyboardButton("🗑️ Delete Instance", callback_data=f"delete_{instance_index}")])
+    keyboard.append([InlineKeyboardButton("🔙 Back to List", callback_data="stop_instance")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.callback_query.edit_message_text(
+        message,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def pause_instance_action(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Pause an instance"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    stack_name = instance['docker_stack_name']
+    short_id = stack_name[:8]
+
+    # Show processing message
+    await update.callback_query.edit_message_text(
+        f"⏸️ **Pausing Instance**\n\n"
+        f"Stopping containers for `{short_id}...`\n"
+        f"Please wait...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    success = instance_manager.pause_instance(stack_name)
 
     if success:
         await update.callback_query.edit_message_text(
-            f"✅ **Instance Stopped**\n\n"
-            f"Instance `{stack_name[:8]}...` has been stopped and removed.\n\n"
-            f"All containers and data have been cleaned up.",
+            f"✅ **Instance Paused**\n\n"
+            f"Instance `{short_id}...` has been paused.\n"
+            f"Containers are stopped but data is preserved.\n\n"
+            f"Use Resume to start it again.",
             parse_mode=ParseMode.MARKDOWN
         )
     else:
         await update.callback_query.edit_message_text(
-            f"❌ **Failed to Stop Instance**\n\n"
-            f"Could not stop instance `{stack_name[:8]}...`\n\n"
+            f"❌ **Failed to Pause Instance**\n\n"
+            f"Could not pause instance `{short_id}...`\n\n"
+            f"Please check the logs for more details.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+async def resume_instance_action(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Resume an instance"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    stack_name = instance['docker_stack_name']
+    short_id = stack_name[:8]
+
+    # Show processing message
+    await update.callback_query.edit_message_text(
+        f"▶️ **Resuming Instance**\n\n"
+        f"Starting containers for `{short_id}...`\n"
+        f"Please wait...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    success = instance_manager.resume_instance(stack_name)
+
+    if success:
+        await update.callback_query.edit_message_text(
+            f"✅ **Instance Resumed**\n\n"
+            f"Instance `{short_id}...` is now running.\n"
+            f"The bridge should be active again.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.callback_query.edit_message_text(
+            f"❌ **Failed to Resume Instance**\n\n"
+            f"Could not resume instance `{short_id}...`\n\n"
+            f"Please check the logs for more details.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+async def delete_instance_action(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Delete an instance completely"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    stack_name = instance['docker_stack_name']
+    short_id = stack_name[:8]
+
+    # Show confirmation
+    keyboard = [
+        [InlineKeyboardButton("✅ Yes, Delete", callback_data=f"confirm_delete_{instance_index}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"manage_{instance_index}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.callback_query.edit_message_text(
+        f"🗑️ **Confirm Deletion**\n\n"
+        f"Are you sure you want to **permanently delete** instance `{short_id}...`?\n\n"
+        f"⚠️ This will:\n"
+        f"• Stop all containers\n"
+        f"• Remove all data and volumes\n"
+        f"• Delete the instance directory\n\n"
+        f"**This action cannot be undone!**",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def confirm_delete_instance(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Confirm and delete instance"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    stack_name = instance['docker_stack_name']
+    short_id = stack_name[:8]
+
+    # Show processing message
+    await update.callback_query.edit_message_text(
+        f"🗑️ **Deleting Instance**\n\n"
+        f"Removing instance `{short_id}...`\n"
+        f"Please wait...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    success = instance_manager.stop_instance(stack_name)
+
+    if success:
+        await update.callback_query.edit_message_text(
+            f"✅ **Instance Deleted**\n\n"
+            f"Instance `{short_id}...` has been permanently deleted.\n\n"
+            f"All containers and data have been removed.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.callback_query.edit_message_text(
+            f"❌ **Failed to Delete Instance**\n\n"
+            f"Could not delete instance `{short_id}...`\n\n"
             f"Please check the logs for more details.",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -503,7 +829,7 @@ async def back_to_menu_callback(update: Update, context: ContextTypes.DEFAULT_TY
     keyboard = [
         [InlineKeyboardButton("📋 List Instances", callback_data="list_instances")],
         [InlineKeyboardButton("➕ Create Instance", callback_data="create_instance")],
-        [InlineKeyboardButton("❌ Stop Instance", callback_data="stop_instance")],
+        [InlineKeyboardButton("⚙️ Manage Instances", callback_data="stop_instance")],
         [InlineKeyboardButton("ℹ️ Help", callback_data="help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -546,8 +872,8 @@ def main():
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(conversation_handler)
-    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(list_instances|stop_instance|help|back_to_menu)$"))
-    application.add_handler(CallbackQueryHandler(button_callback, pattern="^stop_.*"))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(list_instances|create_instance|stop_instance|help|back_to_menu)$"))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(manage|pause|resume|delete|confirm_delete)_\d+$"))
     application.add_handler(CallbackQueryHandler(back_to_menu_callback, pattern="^back_to_menu$"))
 
     logger.info("TGCrossChat Manager Bot starting...")

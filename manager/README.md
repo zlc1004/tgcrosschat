@@ -40,14 +40,20 @@ A Telegram bot-based management system for creating and managing multiple TGCros
 
 ### Instance Management
 - **Create Instance**: Set up a new TGCrossChat bridge
+  - Supports multiple instances per user
   - Asks for Discord user token (selfbot)
   - Asks for Telegram bot token
   - Asks for Telegram topics channel ID
   - Automatically clones repository, configures environment, and starts services
 
-- **List Instances**: View all active instances with their details
+- **List Instances**: View all instances with real-time status indicators
+  - 🟢 Running | 🔴 Stopped | 🟡 Unknown
 
-- **Stop Instance**: Remove an instance and clean up all resources
+- **Manage Instances**: Individual instance control panel
+  - **Pause/Resume**: Stop/start containers without losing data (`compose stop`/`compose up -d`)
+  - **Refresh Status**: Update real-time status display
+  - **Delete**: Permanently remove instance and all data
+  - Real-time status monitoring
 
 ### Security
 - Only responds to commands from DMs with the configured username
@@ -91,7 +97,7 @@ manager/
 
 ## Notes
 
-- Each chat can only have one active instance
+- Multiple instances can be created per user
 - Instance names are generated using SHA256 hash of chat_id + discord_token + telegram_token
 - All containers use unique project names to avoid conflicts
 - Stopping an instance removes all associated containers and data

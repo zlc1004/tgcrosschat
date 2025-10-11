@@ -1,109 +1,48 @@
 # TGCrossChat Manager
 
-A Telegram bot-based management system for creating and managing multiple TGCrossChat instances.
+A Telegram bot to manage multiple TGCrossChat instances that bridge Discord and Telegram.
 
-## Setup
+## Quick Setup
 
-1. **Configure the manager bot**:
-   - Create a new Telegram bot via @BotFather
-   - Copy the bot token to `config.py` (`telegram_bot_token`)
-   - Set your Telegram username in `config.py` (`telegram_username`)
+1. **Configure the bot**:
+   ```python
+   # manager/config.py
+   telegram_bot_token = "your_bot_token_from_botfather"
+   telegram_username = "your_telegram_username"
+   ```
 
 2. **Install dependencies**:
    ```bash
    pip install python-telegram-bot==22.0
    ```
 
-3. **Configure `config.py`**:
-   ```python
-   # Telegram Bot Token for the manager bot (get from @BotFather)
-   telegram_bot_token = "1234567890:ABCdefGHIjklMNOpqrSTUvwxyz"
-
-   # Telegram Username (without @) of the authorized user
-   telegram_username = "yourusername"  # Your Telegram username
-   ```
-
-## Usage
-
-1. **Start the manager bot**:
+3. **Run the manager**:
    ```bash
    cd manager
    python manager.py
    ```
 
-2. **Interact with the bot**:
-   - Send `/start` in a DM with the bot to see the management panel
-   - Use `/status` for a quick overview of active instances
-   - Bot only responds to DMs from the configured username
+4. **Use the bot**: Send `/start` in a DM with your bot
 
 ## Features
 
-### Instance Management
-- **Create Instance**: Set up a new TGCrossChat bridge
-  - Supports multiple instances per user
-  - Asks for Discord user token (selfbot)
-  - Asks for Telegram bot token
-  - Asks for Telegram topics channel ID
-  - Automatically clones repository, configures environment, and starts services
+- ✅ **Create instances** - Set up new Discord ↔ Telegram bridges
+- 📋 **List instances** - View all your bridges with status
+- ⚙️ **Manage instances** - Pause/resume/delete individual bridges
+- 📊 **View details** - See Docker container info and resource usage
+- 🆔 **Get chat IDs** - Use `/id` command anywhere
 
-- **List Instances**: View all instances with real-time status indicators
-  - 🟢 Running | 🔴 Stopped | 🟡 Unknown
+## How It Works
 
-- **Manage Instances**: Individual instance control panel
-  - **Pause/Resume**: Stop/start containers without losing data (`compose stop`/`compose up -d`)
-  - **Refresh Status**: Update real-time status display
-  - **View Details**: Comprehensive Docker information including:
-    - Container states and status
-    - Resource usage (CPU, Memory, Network, Disk I/O)
-    - Image information and creation times
-    - Restart counts and detailed inspection data
-  - **Delete**: Permanently remove instance and all data
-  - Real-time status monitoring
+Each instance:
+- Gets its own Docker containers
+- Runs independently from others
+- Can be paused/resumed without data loss
+- Uses unique hash-based naming
 
-### Security
-- Only responds to commands from DMs with the configured username
-- Ignores all group/channel messages for security
-- Each instance is isolated using Docker containers
-- Automatic cleanup on failures
+## Requirements
 
-### Data Management
-- Instances are stored in `data.json` with the structure:
-  ```json
-  [
-    {
-      "chatid": "123456789",
-      "discord_token": "discord_user_token",
-      "telegram_token": "telegram_bot_token",
-      "topics_channel_id": "telegram_channel_id",
-      "docker_stack_name": "sha256_hash"
-    }
-  ]
-  ```
-
-## File Structure
-
-```
-manager/
-├── manager.py          # Main manager bot application
-├── config.py           # Configuration file
-├── data.json           # Instance data storage
-├── instances/          # Directory for cloned instances
-│   └── {hash}/         # Individual instance directories
-└── README.md           # This file
-```
-
-## Prerequisites
-
-- Docker and Docker Compose installed
-- Git installed
-- Python 3.7+ with python-telegram-bot library
-- Access to create Telegram bots via @BotFather
-- A Telegram account with a username (required for authorization)
-
-## Notes
-
-- Multiple instances can be created per user
-- Instance names are generated using SHA256 hash of chat_id + discord_token + telegram_token
-- All containers use unique project names to avoid conflicts
-- Stopping an instance removes all associated containers and data
-- Detailed instance information is gathered using Docker's JSON API (`docker compose ps --format json`, `docker inspect`, `docker stats`)
+- Docker & Docker Compose
+- Git
+- Python 3.7+
+- Telegram bot token (from @BotFather)

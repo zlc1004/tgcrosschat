@@ -2,6 +2,8 @@
 
 A Discord ↔ Telegram bridge that forwards messages between the two platforms in real-time.
 
+Made for users that use Telegram as their main messaging app but have friends on Discord.
+
 ## 🚀 **Recommended: Use the Manager Bot**
 
 For easy setup and management of multiple instances, use our **Telegram bot manager**:

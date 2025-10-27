@@ -476,7 +476,7 @@ class MessageBridge:
             content = update.message.text or ""
 
             # Handle images and documents - append URL to content like old.py
-            if update.message.photo:
+            if len(update.message.photo) > 0:
                 # Get the largest photo using same method as old.py
                 file_url = (await update.message.photo[-1].get_file()).file_path
                 content = (content or "") + "\n" + file_url

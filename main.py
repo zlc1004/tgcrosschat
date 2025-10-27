@@ -1191,38 +1191,16 @@ def run_telegram_bot():
 
     # Add message handlers for topic messages (matching old.py structure)
     # Text messages (excluding photos and replies)
-    text_handler = MessageHandler(
-        filters.TEXT & ~filters.COMMAND & ~filters.PHOTO & ~filters.REPLY,
-        handle_telegram_message
-    )
-    telegram_app.add_handler(text_handler)
-
-    # Photo messages (excluding replies)
-    photo_handler = MessageHandler(
-        filters.PHOTO & ~filters.COMMAND & ~filters.REPLY,
-        handle_telegram_photo
-    )
-    telegram_app.add_handler(photo_handler)
-
-    # Text replies (excluding photos)
-    reply_handler = MessageHandler(
-        filters.REPLY & ~filters.COMMAND & ~filters.PHOTO,
-        handle_telegram_reply
-    )
-    telegram_app.add_handler(reply_handler)
-
-    # Photo replies
-    reply_photo_handler = MessageHandler(
-        filters.REPLY & filters.PHOTO & ~filters.COMMAND,
-        handle_telegram_reply_photo
-    )
-    telegram_app.add_handler(reply_photo_handler)
-
+    
     # Add edit handler for edited messages
     edit_handler = MessageHandler(
         filters.UpdateType.EDITED_MESSAGE,
         handle_telegram_edit
     )
+    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.PHOTO & ~filters.REPLY, handle_telegram_message))
+    telegram_app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND & ~filters.REPLY, handle_telegram_message))
+    telegram_app.add_handler(MessageHandler(filters.REPLY & ~filters.COMMAND & ~filters.PHOTO, handle_telegram_message))
+    telegram_app.add_handler(MessageHandler(filters.REPLY & filters.PHOTO & ~filters.COMMAND, handle_telegram_message))
     telegram_app.add_handler(edit_handler)
 
     # Start Telegram bot

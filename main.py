@@ -454,11 +454,19 @@ class MessageBridge:
             # Check if this is a reply to another message
             message_reference = None
             if update.message.reply_to_message:
-                # Find the corresponding Discord message (look for the original Discord message that was forwarded TO Telegram)
+                # First, look for Discord messages that were forwarded TO Telegram
                 reply_mapping = messages_collection.find_one({
                     "telegram_message_id": update.message.reply_to_message.message_id,
                     "direction": "discord_to_telegram"
                 })
+
+                # If not found, look for Telegram messages that were forwarded TO Discord
+                if not reply_mapping:
+                    reply_mapping = messages_collection.find_one({
+                        "telegram_message_id": update.message.reply_to_message.message_id,
+                        "direction": "telegram_to_discord"
+                    })
+
                 if reply_mapping and reply_mapping.get("discord_message_id"):
                     message_reference = {
                         "message_id": str(reply_mapping["discord_message_id"])
@@ -659,17 +667,76 @@ class MessageBridge:
         except Exception as e:
             logger.error(f"Failed to send file to Discord: {e}")
 
+    async def _send_discord_channel_file(self, discord_channel_id: int, content: str, file_url: str, filename: str, message_reference: dict = None):
+        """Send file to Discord channel using multipart form data"""
+        try:
+            # Download the file
+            file_response = requests.get(file_url)
+            if file_response.status_code != 200:
+                logger.error(f"Failed to download file from Telegram: {file_response.status_code}")
+                return
+
+            # Prepare multipart form data
+            files = {
+                'files[0]': (filename, file_response.content)
+            }
+
+            data = {
+                'content': content,
+                'payload_json': {
+                    'content': content
+                }
+            }
+
+            if message_reference:
+                data['payload_json']['message_reference'] = message_reference
+
+            # Convert payload_json to string
+            data['payload_json'] = json.dumps(data['payload_json'])
+
+            headers = {
+                "Authorization": DISCORD_TOKEN,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+            }
+
+            response = requests.post(
+                f"https://discord.com/api/v9/channels/{discord_channel_id}/messages",
+                files=files,
+                data=data,
+                headers=headers
+            )
+
+            if response.status_code == 200:
+                discord_msg_data = response.json()
+                discord_msg_id = discord_msg_data["id"]
+
+                logger.info(f"Successfully sent file {filename} to Discord channel {discord_channel_id}")
+                return discord_msg_id
+            else:
+                logger.error(f"Failed to send Discord channel file. Status: {response.status_code}, Response: {response.text}")
+
+        except Exception as e:
+            logger.error(f"Failed to send file to Discord channel: {e}")
+
     async def _send_discord_channel_message(self, discord_channel_id: int, update: Update, topic_id: int):
         """Send message to Discord channel using HTTP API"""
         try:
             # Check if this is a reply to another message
             message_reference = None
             if update.message.reply_to_message:
-                # Find the corresponding Discord message
+                # First, look for Discord messages that were forwarded TO Telegram
                 reply_mapping = messages_collection.find_one({
                     "telegram_message_id": update.message.reply_to_message.message_id,
                     "direction": "discord_to_telegram"
                 })
+
+                # If not found, look for Telegram messages that were forwarded TO Discord
+                if not reply_mapping:
+                    reply_mapping = messages_collection.find_one({
+                        "telegram_message_id": update.message.reply_to_message.message_id,
+                        "direction": "telegram_to_discord"
+                    })
+
                 if reply_mapping and reply_mapping.get("discord_message_id"):
                     message_reference = {
                         "message_id": str(reply_mapping["discord_message_id"])
@@ -681,8 +748,36 @@ class MessageBridge:
             # Send just the content without Telegram header
             full_content = content
 
-            # Handle media (simplified for channels)
-            if update.message.photo or update.message.document or update.message.video:
+            # Handle media for channels
+            if update.message.photo:
+                # Get the largest photo
+                photo = update.message.photo[-1]
+                file_info = await self.telegram_bot.get_file(photo.file_id)
+                file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
+
+                # Send image to Discord channel using webhook-style approach
+                discord_msg_id = await self._send_discord_channel_file(discord_channel_id, full_content, file_url, "image.jpg", message_reference)
+
+                if discord_msg_id:
+                    # Store message mapping for image
+                    message_doc = {
+                        "message_content": content,
+                        "discord_channel_id": discord_channel_id,
+                        "discord_message_id": discord_msg_id,
+                        "telegram_channel_id": TOPICS_CHANNEL_ID,
+                        "telegram_topic_id": topic_id,
+                        "telegram_message_id": update.message.message_id,
+                        "direction": "telegram_to_discord",
+                        "timestamp": datetime.utcnow(),
+                        "is_reply": message_reference is not None,
+                        "reply_to_discord_id": message_reference["message_id"] if message_reference else None,
+                        "has_attachment": True,
+                        "attachment_filename": "image.jpg"
+                    }
+                    messages_collection.insert_one(message_doc)
+                return
+
+            elif update.message.document or update.message.video:
                 full_content = "[Media - check Telegram for full content]"
 
             if not full_content.strip():

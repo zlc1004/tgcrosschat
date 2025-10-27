@@ -1086,6 +1086,18 @@ async def handle_telegram_edit(update: Update, context: ContextTypes.DEFAULT_TYP
     """Handle edited Telegram messages"""
     await bridge.edit_telegram_message_in_discord(update, context)
 
+async def handle_telegram_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle photo messages from Telegram"""
+    await bridge.forward_telegram_to_discord(update, context)
+
+async def handle_telegram_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle reply messages from Telegram"""
+    await bridge.forward_telegram_to_discord(update, context)
+
+async def handle_telegram_reply_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle reply photo messages from Telegram"""
+    await bridge.forward_telegram_to_discord(update, context)
+
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ping command"""
     await update.message.reply_text("pong")
@@ -1257,12 +1269,34 @@ def run_telegram_bot():
     unlink_handler = CommandHandler("unlink", unlink_command)
     telegram_app.add_handler(unlink_handler)
 
-    # Add message handler for topic messages
-    message_handler = MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
+    # Add message handlers for topic messages (matching old.py structure)
+    # Text messages (excluding photos and replies)
+    text_handler = MessageHandler(
+        filters.TEXT & ~filters.COMMAND & ~filters.PHOTO & ~filters.REPLY,
         handle_telegram_message
     )
-    telegram_app.add_handler(message_handler)
+    telegram_app.add_handler(text_handler)
+
+    # Photo messages (excluding replies)
+    photo_handler = MessageHandler(
+        filters.PHOTO & ~filters.COMMAND & ~filters.REPLY,
+        handle_telegram_photo
+    )
+    telegram_app.add_handler(photo_handler)
+
+    # Text replies (excluding photos)
+    reply_handler = MessageHandler(
+        filters.REPLY & ~filters.COMMAND & ~filters.PHOTO,
+        handle_telegram_reply
+    )
+    telegram_app.add_handler(reply_handler)
+
+    # Photo replies
+    reply_photo_handler = MessageHandler(
+        filters.REPLY & filters.PHOTO & ~filters.COMMAND,
+        handle_telegram_reply_photo
+    )
+    telegram_app.add_handler(reply_photo_handler)
 
     # Add edit handler for edited messages
     edit_handler = MessageHandler(

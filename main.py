@@ -475,85 +475,21 @@ class MessageBridge:
             # Handle different message types
             content = update.message.text or ""
 
-            # Handle images and documents
+            # Handle images and documents - append URL to content like old.py
             if update.message.photo:
-                # Get the largest photo
-                photo = update.message.photo[-1]
-                file_info = await self.telegram_bot.get_file(photo.file_id)
-                file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
-                content = content or "[Image]"
-                discord_msg_id = await self._send_discord_file(discord_user_id, dm_channel_id, content, file_url, "image.jpg", message_reference)
-
-                if discord_msg_id:
-                    # Store message mapping for image
-                    message_doc = {
-                        "message_content": content,
-                        "discord_channel_id": discord_user_id,
-                        "discord_message_id": discord_msg_id,
-                        "telegram_channel_id": TOPICS_CHANNEL_ID,
-                        "telegram_topic_id": topic_id,
-                        "telegram_message_id": update.message.message_id,
-                        "direction": "telegram_to_discord",
-                        "timestamp": datetime.utcnow(),
-                        "is_reply": message_reference is not None,
-                        "reply_to_discord_id": message_reference["message_id"] if message_reference else None,
-                        "has_attachment": True,
-                        "attachment_filename": "image.jpg"
-                    }
-                    messages_collection.insert_one(message_doc)
-                return
+                # Get the largest photo using same method as old.py
+                file_url = (await update.message.photo[-1].get_file()).file_path
+                content = (content or "") + "\n" + file_url
 
             elif update.message.document:
                 doc = update.message.document
-                file_info = await self.telegram_bot.get_file(doc.file_id)
-                file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
-                content = content or f"[Document: {doc.file_name}]"
-                discord_msg_id = await self._send_discord_file(discord_user_id, dm_channel_id, content, file_url, doc.file_name, message_reference)
-
-                if discord_msg_id:
-                    # Store message mapping for document
-                    message_doc = {
-                        "message_content": content,
-                        "discord_channel_id": discord_user_id,
-                        "discord_message_id": discord_msg_id,
-                        "telegram_channel_id": TOPICS_CHANNEL_ID,
-                        "telegram_topic_id": topic_id,
-                        "telegram_message_id": update.message.message_id,
-                        "direction": "telegram_to_discord",
-                        "timestamp": datetime.utcnow(),
-                        "is_reply": message_reference is not None,
-                        "reply_to_discord_id": message_reference["message_id"] if message_reference else None,
-                        "has_attachment": True,
-                        "attachment_filename": doc.file_name
-                    }
-                    messages_collection.insert_one(message_doc)
-                return
+                file_url = (await doc.get_file()).file_path
+                content = (content or "") + "\n" + file_url
 
             elif update.message.video:
                 video = update.message.video
-                file_info = await self.telegram_bot.get_file(video.file_id)
-                file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
-                content = content or "[Video]"
-                discord_msg_id = await self._send_discord_file(discord_user_id, dm_channel_id, content, file_url, "video.mp4", message_reference)
-
-                if discord_msg_id:
-                    # Store message mapping for video
-                    message_doc = {
-                        "message_content": content,
-                        "discord_channel_id": discord_user_id,
-                        "discord_message_id": discord_msg_id,
-                        "telegram_channel_id": TOPICS_CHANNEL_ID,
-                        "telegram_topic_id": topic_id,
-                        "telegram_message_id": update.message.message_id,
-                        "direction": "telegram_to_discord",
-                        "timestamp": datetime.utcnow(),
-                        "is_reply": message_reference is not None,
-                        "reply_to_discord_id": message_reference["message_id"] if message_reference else None,
-                        "has_attachment": True,
-                        "attachment_filename": "video.mp4"
-                    }
-                    messages_collection.insert_one(message_doc)
-                return
+                file_url = (await video.get_file()).file_path
+                content = (content or "") + "\n" + file_url
 
             # Handle text messages
             if not content:
@@ -748,37 +684,21 @@ class MessageBridge:
             # Send just the content without Telegram header
             full_content = content
 
-            # Handle media for channels
+            # Handle media for channels - append URLs to content like old.py
             if update.message.photo:
-                # Get the largest photo
-                photo = update.message.photo[-1]
-                file_info = await self.telegram_bot.get_file(photo.file_id)
-                file_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_info.file_path}"
+                # Get the largest photo using same method as old.py
+                file_url = (await update.message.photo[-1].get_file()).file_path
+                full_content = (full_content or "") + "\n" + file_url
 
-                # Send image to Discord channel using webhook-style approach
-                discord_msg_id = await self._send_discord_channel_file(discord_channel_id, full_content, file_url, "image.jpg", message_reference)
+            elif update.message.document:
+                # Get document URL
+                file_url = (await update.message.document.get_file()).file_path
+                full_content = (full_content or "") + "\n" + file_url
 
-                if discord_msg_id:
-                    # Store message mapping for image
-                    message_doc = {
-                        "message_content": content,
-                        "discord_channel_id": discord_channel_id,
-                        "discord_message_id": discord_msg_id,
-                        "telegram_channel_id": TOPICS_CHANNEL_ID,
-                        "telegram_topic_id": topic_id,
-                        "telegram_message_id": update.message.message_id,
-                        "direction": "telegram_to_discord",
-                        "timestamp": datetime.utcnow(),
-                        "is_reply": message_reference is not None,
-                        "reply_to_discord_id": message_reference["message_id"] if message_reference else None,
-                        "has_attachment": True,
-                        "attachment_filename": "image.jpg"
-                    }
-                    messages_collection.insert_one(message_doc)
-                return
-
-            elif update.message.document or update.message.video:
-                full_content = "[Media - check Telegram for full content]"
+            elif update.message.video:
+                # Get video URL
+                file_url = (await update.message.video.get_file()).file_path
+                full_content = (full_content or "") + "\n" + file_url
 
             if not full_content.strip():
                 full_content = "[Empty message]"

@@ -348,6 +348,104 @@ class InstanceManager:
         except Exception:
             return {"error": "Stats unavailable"}
 
+    def edit_instance_preserve_db(self, docker_stack_name: str, env_key: str, new_value: str) -> bool:
+        """Edit instance by stopping containers, editing .env, and restarting"""
+        instance_path = self.instances_dir / docker_stack_name
+
+        if not instance_path.exists():
+            logger.error(f"Instance path does not exist: {instance_path}")
+            return False
+
+        env_path = instance_path / ".env"
+        if not env_path.exists():
+            logger.error(f".env file does not exist: {env_path}")
+            return False
+
+        try:
+            # Stop containers
+            logger.info(f"Stopping containers for instance {docker_stack_name}")
+            subprocess.run([
+                "docker", "compose", "-p", docker_stack_name, "down"
+            ], cwd=instance_path, check=True, capture_output=True, text=True)
+
+            # Read current .env file
+            with open(env_path, 'r') as f:
+                env_content = f.read()
+
+            # Replace the specific environment variable
+            lines = env_content.split('\n')
+            updated_lines = []
+            key_found = False
+
+            for line in lines:
+                if line.startswith(f"{env_key}="):
+                    updated_lines.append(f"{env_key}={new_value}")
+                    key_found = True
+                else:
+                    updated_lines.append(line)
+
+            # If key wasn't found, add it
+            if not key_found:
+                updated_lines.append(f"{env_key}={new_value}")
+
+            # Write updated .env file
+            with open(env_path, 'w') as f:
+                f.write('\n'.join(updated_lines))
+
+            # Start containers
+            logger.info(f"Starting containers for instance {docker_stack_name}")
+            subprocess.run([
+                "docker", "compose", "-p", docker_stack_name, "up", "-d"
+            ], cwd=instance_path, check=True, capture_output=True, text=True)
+
+            # Update instance status
+            for instance in self.instances:
+                if instance["docker_stack_name"] == docker_stack_name:
+                    instance["status"] = "running"
+                    break
+            self.save_data()
+
+            logger.info(f"Successfully updated {env_key} for instance {docker_stack_name}")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to edit instance {docker_stack_name}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error editing instance {docker_stack_name}: {e}")
+            return False
+
+    def recreate_instance(self, instance_index: int, discord_token: str = None, telegram_token: str = None, topics_channel_id: str = None) -> bool:
+        """Recreate instance by deleting and creating new one"""
+        if instance_index < 0 or instance_index >= len(self.instances):
+            logger.error(f"Invalid instance index: {instance_index}")
+            return False
+
+        instance = self.instances[instance_index]
+        old_stack_name = instance['docker_stack_name']
+        chatid = instance['chatid']
+
+        # Use new values or keep existing ones
+        new_discord_token = discord_token or instance['discord_token']
+        new_telegram_token = telegram_token or instance['telegram_token']
+        new_topics_channel_id = topics_channel_id or instance['topics_channel_id']
+
+        try:
+            # Stop and remove old instance
+            logger.info(f"Removing old instance {old_stack_name}")
+            self.stop_instance(old_stack_name)
+
+            # Create new instance with updated values
+            logger.info(f"Creating new instance for chat {chatid}")
+            new_instance = self.create_instance(chatid, new_discord_token, new_telegram_token, new_topics_channel_id)
+
+            logger.info(f"Successfully recreated instance. Old: {old_stack_name}, New: {new_instance['docker_stack_name']}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to recreate instance {old_stack_name}: {e}")
+            return False
+
     def list_instances(self) -> List[Dict]:
         """List all instances"""
         return self.instances.copy()
@@ -434,6 +532,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Please try again.",
                 parse_mode=ParseMode.MARKDOWN
             )
+    elif query.data.startswith("edit_"):
+        try:
+            instance_index = int(query.data[5:])  # Remove "edit_" prefix
+            await edit_instance_callback(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
     elif query.data.startswith("delete_"):
         try:
             instance_index = int(query.data[7:])  # Remove "delete_" prefix
@@ -458,6 +566,76 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             instance_index = int(query.data[8:])  # Remove "details_" prefix
             await show_instance_details(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("edit_discord_token_"):
+        try:
+            instance_index = int(query.data[19:])  # Remove "edit_discord_token_" prefix
+            await edit_discord_token_callback(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("edit_telegram_token_"):
+        try:
+            instance_index = int(query.data[20:])  # Remove "edit_telegram_token_" prefix
+            await edit_telegram_token_callback(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("edit_topics_channel_"):
+        try:
+            instance_index = int(query.data[20:])  # Remove "edit_topics_channel_" prefix
+            await edit_topics_channel_callback(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("preserve_db_"):
+        try:
+            instance_index = int(query.data[12:])  # Remove "preserve_db_" prefix
+            await toggle_preserve_db(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("start_edit_discord_"):
+        try:
+            instance_index = int(query.data[19:])  # Remove "start_edit_discord_" prefix
+            await start_edit_discord_token(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("start_edit_telegram_"):
+        try:
+            instance_index = int(query.data[20:])  # Remove "start_edit_telegram_" prefix
+            await start_edit_telegram_token(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("start_edit_topics_"):
+        try:
+            instance_index = int(query.data[18:])  # Remove "start_edit_topics_" prefix
+            await start_edit_topics_channel(update, context, instance_index)
         except ValueError:
             await query.edit_message_text(
                 "❌ **Invalid Action**\n\n"
@@ -597,6 +775,7 @@ async def manage_instance_callback(update: Update, context: ContextTypes.DEFAULT
 
     keyboard.append([InlineKeyboardButton("🔄 Refresh Status", callback_data=f"manage_{instance_index}")])
     keyboard.append([InlineKeyboardButton("📊 View Details", callback_data=f"details_{instance_index}")])
+    keyboard.append([InlineKeyboardButton("✏️ Edit Instance", callback_data=f"edit_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🗑️ Delete Instance", callback_data=f"delete_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🔙 Back to List", callback_data="stop_instance")])
 
@@ -868,6 +1047,489 @@ async def confirm_delete_instance(update: Update, context: ContextTypes.DEFAULT_
             parse_mode=ParseMode.MARKDOWN
         )
 
+async def edit_instance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Show edit options for a specific instance"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    short_id = instance['docker_stack_name'][:8]
+
+    message = f"✏️ **Edit Instance**\n\n"
+    message += f"Instance: `{short_id}...`\n"
+    message += f"Chat ID: `{instance['chatid']}`\n"
+    message += f"Topics Channel: `{instance['topics_channel_id']}`\n\n"
+    message += f"Choose what to edit:"
+
+    keyboard = [
+        [InlineKeyboardButton("🔑 Discord Token", callback_data=f"edit_discord_token_{instance_index}")],
+        [InlineKeyboardButton("🤖 Telegram Bot Token", callback_data=f"edit_telegram_token_{instance_index}")],
+        [InlineKeyboardButton("📋 Topics Channel ID", callback_data=f"edit_topics_channel_{instance_index}")],
+        [InlineKeyboardButton("🔙 Back to Instance", callback_data=f"manage_{instance_index}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.callback_query.edit_message_text(
+        message,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def edit_discord_token_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Show preserve DB option for Discord token edit"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    short_id = instance['docker_stack_name'][:8]
+
+    # Store edit context in user data
+    context.user_data['edit_type'] = 'discord_token'
+    context.user_data['instance_index'] = instance_index
+    preserve_db = context.user_data.get('preserve_db', True)  # Default true
+
+    message = f"🔑 **Edit Discord Token**\n\n"
+    message += f"Instance: `{short_id}...`\n\n"
+    message += f"**Preserve Database:** {'✅ Yes' if preserve_db else '❌ No'}\n\n"
+    message += f"• **Yes (Default):** Stop container → Edit token → Restart\n"
+    message += f"• **No:** Delete instance → Recreate with new token\n\n"
+    message += f"Toggle the preserve database option:"
+
+    keyboard = [
+        [InlineKeyboardButton(f"🔄 Preserve DB: {'✅ Yes' if preserve_db else '❌ No'}", callback_data=f"preserve_db_{instance_index}")],
+        [InlineKeyboardButton("✏️ Continue Edit", callback_data=f"start_edit_discord_{instance_index}")],
+        [InlineKeyboardButton("🔙 Back to Edit Menu", callback_data=f"edit_{instance_index}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.callback_query.edit_message_text(
+        message,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def edit_telegram_token_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Show preserve DB option for Telegram token edit"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    short_id = instance['docker_stack_name'][:8]
+
+    # Store edit context in user data
+    context.user_data['edit_type'] = 'telegram_token'
+    context.user_data['instance_index'] = instance_index
+    preserve_db = context.user_data.get('preserve_db', True)  # Default true
+
+    message = f"🤖 **Edit Telegram Bot Token**\n\n"
+    message += f"Instance: `{short_id}...`\n\n"
+    message += f"**Preserve Database:** {'✅ Yes' if preserve_db else '❌ No'}\n\n"
+    message += f"• **Yes (Default):** Stop container → Edit token → Restart\n"
+    message += f"• **No:** Delete instance → Recreate with new token\n\n"
+    message += f"Toggle the preserve database option:"
+
+    keyboard = [
+        [InlineKeyboardButton(f"🔄 Preserve DB: {'✅ Yes' if preserve_db else '❌ No'}", callback_data=f"preserve_db_{instance_index}")],
+        [InlineKeyboardButton("✏️ Continue Edit", callback_data=f"start_edit_telegram_{instance_index}")],
+        [InlineKeyboardButton("��� Back to Edit Menu", callback_data=f"edit_{instance_index}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.callback_query.edit_message_text(
+        message,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def edit_topics_channel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Show preserve DB option for Topics channel edit"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    short_id = instance['docker_stack_name'][:8]
+
+    # Store edit context in user data
+    context.user_data['edit_type'] = 'topics_channel'
+    context.user_data['instance_index'] = instance_index
+    preserve_db = context.user_data.get('preserve_db', True)  # Default true
+
+    message = f"📋 **Edit Topics Channel ID**\n\n"
+    message += f"Instance: `{short_id}...`\n\n"
+    message += f"**Preserve Database:** {'✅ Yes' if preserve_db else '❌ No'}\n\n"
+    message += f"• **Yes (Default):** Stop container → Edit channel → Restart\n"
+    message += f"• **No:** Delete instance → Recreate with new channel\n\n"
+    message += f"Toggle the preserve database option:"
+
+    keyboard = [
+        [InlineKeyboardButton(f"🔄 Preserve DB: {'✅ Yes' if preserve_db else '❌ No'}", callback_data=f"preserve_db_{instance_index}")],
+        [InlineKeyboardButton("✏️ Continue Edit", callback_data=f"start_edit_topics_{instance_index}")],
+        [InlineKeyboardButton("🔙 Back to Edit Menu", callback_data=f"edit_{instance_index}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.callback_query.edit_message_text(
+        message,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def toggle_preserve_db(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Toggle preserve database setting"""
+    current_preserve = context.user_data.get('preserve_db', True)
+    context.user_data['preserve_db'] = not current_preserve
+
+    edit_type = context.user_data.get('edit_type')
+
+    # Redirect back to appropriate edit callback
+    if edit_type == 'discord_token':
+        await edit_discord_token_callback(update, context, instance_index)
+    elif edit_type == 'telegram_token':
+        await edit_telegram_token_callback(update, context, instance_index)
+    elif edit_type == 'topics_channel':
+        await edit_topics_channel_callback(update, context, instance_index)
+
+async def start_edit_discord_token(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Start editing Discord token"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    short_id = instance['docker_stack_name'][:8]
+    preserve_db = context.user_data.get('preserve_db', True)
+
+    message = f"🔑 **Edit Discord Token**\n\n"
+    message += f"Instance: `{short_id}...`\n"
+    message += f"Preserve Database: {'✅ Yes' if preserve_db else '❌ No'}\n\n"
+    message += f"Please send the new Discord user token:"
+
+    context.user_data['editing_discord_token'] = True
+    context.user_data['edit_instance_index'] = instance_index
+
+    await update.callback_query.edit_message_text(
+        message,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def start_edit_telegram_token(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Start editing Telegram token"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    short_id = instance['docker_stack_name'][:8]
+    preserve_db = context.user_data.get('preserve_db', True)
+
+    message = f"🤖 **Edit Telegram Bot Token**\n\n"
+    message += f"Instance: `{short_id}...`\n"
+    message += f"Preserve Database: {'✅ Yes' if preserve_db else '❌ No'}\n\n"
+    message += f"Please send the new Telegram bot token:"
+
+    context.user_data['editing_telegram_token'] = True
+    context.user_data['edit_instance_index'] = instance_index
+
+    await update.callback_query.edit_message_text(
+        message,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def start_edit_topics_channel(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Start editing Topics channel ID"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    short_id = instance['docker_stack_name'][:8]
+    preserve_db = context.user_data.get('preserve_db', True)
+
+    message = f"📋 **Edit Topics Channel ID**\n\n"
+    message += f"Instance: `{short_id}...`\n"
+    message += f"Preserve Database: {'✅ Yes' if preserve_db else '❌ No'}\n\n"
+    message += f"Please send the new Topics channel ID:"
+
+    context.user_data['editing_topics_channel'] = True
+    context.user_data['edit_instance_index'] = instance_index
+
+    await update.callback_query.edit_message_text(
+        message,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def handle_edit_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle input for editing instance parameters"""
+    # Check what's being edited
+    if context.user_data.get('editing_discord_token'):
+        return await handle_discord_token_edit(update, context)
+    elif context.user_data.get('editing_telegram_token'):
+        return await handle_telegram_token_edit(update, context)
+    elif context.user_data.get('editing_topics_channel'):
+        return await handle_topics_channel_edit(update, context)
+
+    # If not editing, pass to other handlers
+    return ConversationHandler.END
+
+async def handle_discord_token_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle Discord token edit"""
+    new_token = update.message.text.strip()
+    instance_index = context.user_data.get('edit_instance_index')
+    preserve_db = context.user_data.get('preserve_db', True)
+
+    instances = instance_manager.list_instances()
+    if instance_index is None or instance_index < 0 or instance_index >= len(instances):
+        await update.message.reply_text(
+            "❌ **Edit Failed**\n\n"
+            "Instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    instance = instances[instance_index]
+    stack_name = instance['docker_stack_name']
+    short_id = stack_name[:8]
+
+    # Show processing message
+    await update.message.reply_text(
+        f"⚙️ **Updating Discord Token**\n\n"
+        f"Instance: `{short_id}...`\n"
+        f"Preserve Database: {'✅ Yes' if preserve_db else '❌ No'}\n\n"
+        f"Please wait...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    try:
+        if preserve_db:
+            # Stop container, edit .env, restart
+            success = instance_manager.edit_instance_preserve_db(stack_name, 'DISCORD_TOKEN', new_token)
+        else:
+            # Delete and recreate instance
+            success = instance_manager.recreate_instance(instance_index, discord_token=new_token)
+
+        if success:
+            # Update data.json
+            instances[instance_index]['discord_token'] = new_token
+            instance_manager.save_data()
+
+            await update.message.reply_text(
+                f"✅ **Discord Token Updated**\n\n"
+                f"Instance `{short_id}...` has been updated successfully.\n\n"
+                f"Method: {'Preserve Database' if preserve_db else 'Recreate Instance'}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ **Failed to Update Discord Token**\n\n"
+                f"Could not update instance `{short_id}...`\n\n"
+                f"Please check the logs for more details.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ **Edit Failed**\n\n"
+            f"Error: {str(e)}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    # Clear edit state
+    context.user_data.clear()
+    return ConversationHandler.END
+
+async def handle_telegram_token_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle Telegram token edit"""
+    new_token = update.message.text.strip()
+    instance_index = context.user_data.get('edit_instance_index')
+    preserve_db = context.user_data.get('preserve_db', True)
+
+    instances = instance_manager.list_instances()
+    if instance_index is None or instance_index < 0 or instance_index >= len(instances):
+        await update.message.reply_text(
+            "❌ **Edit Failed**\n\n"
+            "Instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    instance = instances[instance_index]
+    stack_name = instance['docker_stack_name']
+    short_id = stack_name[:8]
+
+    # Show processing message
+    await update.message.reply_text(
+        f"⚙️ **Updating Telegram Bot Token**\n\n"
+        f"Instance: `{short_id}...`\n"
+        f"Preserve Database: {'✅ Yes' if preserve_db else '❌ No'}\n\n"
+        f"Please wait...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    try:
+        if preserve_db:
+            # Stop container, edit .env, restart
+            success = instance_manager.edit_instance_preserve_db(stack_name, 'TELEGRAM_BOT_TOKEN', new_token)
+        else:
+            # Delete and recreate instance
+            success = instance_manager.recreate_instance(instance_index, telegram_token=new_token)
+
+        if success:
+            # Update data.json
+            instances[instance_index]['telegram_token'] = new_token
+            instance_manager.save_data()
+
+            await update.message.reply_text(
+                f"✅ **Telegram Bot Token Updated**\n\n"
+                f"Instance `{short_id}...` has been updated successfully.\n\n"
+                f"Method: {'Preserve Database' if preserve_db else 'Recreate Instance'}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ **Failed to Update Telegram Bot Token**\n\n"
+                f"Could not update instance `{short_id}...`\n\n"
+                f"Please check the logs for more details.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ **Edit Failed**\n\n"
+            f"Error: {str(e)}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    # Clear edit state
+    context.user_data.clear()
+    return ConversationHandler.END
+
+async def handle_topics_channel_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle Topics channel edit"""
+    new_channel_id = update.message.text.strip()
+    instance_index = context.user_data.get('edit_instance_index')
+    preserve_db = context.user_data.get('preserve_db', True)
+
+    # Validate channel ID
+    try:
+        int(new_channel_id)
+    except ValueError:
+        await update.message.reply_text(
+            "❌ **Invalid Channel ID**\n\n"
+            "Please send a valid Topics channel ID (numbers only):",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instances = instance_manager.list_instances()
+    if instance_index is None or instance_index < 0 or instance_index >= len(instances):
+        await update.message.reply_text(
+            "❌ **Edit Failed**\n\n"
+            "Instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    instance = instances[instance_index]
+    stack_name = instance['docker_stack_name']
+    short_id = stack_name[:8]
+
+    # Show processing message
+    await update.message.reply_text(
+        f"⚙️ **Updating Topics Channel ID**\n\n"
+        f"Instance: `{short_id}...`\n"
+        f"Preserve Database: {'✅ Yes' if preserve_db else '❌ No'}\n\n"
+        f"Please wait...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    try:
+        if preserve_db:
+            # Stop container, edit .env, restart
+            success = instance_manager.edit_instance_preserve_db(stack_name, 'TOPICS_CHANNEL_ID', new_channel_id)
+        else:
+            # Delete and recreate instance
+            success = instance_manager.recreate_instance(instance_index, topics_channel_id=new_channel_id)
+
+        if success:
+            # Update data.json
+            instances[instance_index]['topics_channel_id'] = new_channel_id
+            instance_manager.save_data()
+
+            await update.message.reply_text(
+                f"✅ **Topics Channel ID Updated**\n\n"
+                f"Instance `{short_id}...` has been updated successfully.\n\n"
+                f"New Channel ID: `{new_channel_id}`\n"
+                f"Method: {'Preserve Database' if preserve_db else 'Recreate Instance'}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ **Failed to Update Topics Channel ID**\n\n"
+                f"Could not update instance `{short_id}...`\n\n"
+                f"Please check the logs for more details.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+    except Exception as e:
+        await update.message.reply_text(
+            f"❌ **Edit Failed**\n\n"
+            f"Error: {str(e)}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    # Clear edit state
+    context.user_data.clear()
+    return ConversationHandler.END
+
 async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show help information"""
     help_text = """
@@ -1084,8 +1746,10 @@ def main():
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(conversation_handler)
     application.add_handler(CallbackQueryHandler(button_callback, pattern="^(list_instances|create_instance|stop_instance|help|back_to_menu)$"))
-    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(manage|pause|resume|delete|confirm_delete|details)_\d+$"))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(manage|pause|resume|delete|confirm_delete|details|edit|edit_discord_token|edit_telegram_token|edit_topics_channel|preserve_db|start_edit_discord|start_edit_telegram|start_edit_topics)_\d+$"))
     application.add_handler(CallbackQueryHandler(back_to_menu_callback, pattern="^back_to_menu$"))
+    # Add message handler for edit inputs (lower priority)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_input))
 
     logger.info("TGCrossChat Manager Bot starting...")
     logger.info(f"Authorized username: @{config.telegram_username}")

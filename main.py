@@ -135,7 +135,8 @@ class MessageBridge:
 
         topic_id = mapping["telegram_topic_id"]
         username = message.author.name
-        user_display_name = message.author.display_name
+        # Use global_name if it exists and is different from username, otherwise use display_name
+        user_display_name = message.author.global_name if (message.author.global_name and message.author.global_name != message.author.name) else message.author.display_name
         channel_name = message.channel.name
 
         try:
@@ -227,7 +228,8 @@ class MessageBridge:
     async def forward_discord_to_telegram(self, message: discord.Message):
         """Forward Discord DM to Telegram topic"""
         username = message.author.name
-        user_display_name = message.author.display_name
+        # Use global_name if it exists and is different from username, otherwise use display_name
+        user_display_name = message.author.global_name if (message.author.global_name and message.author.global_name != message.author.name) else message.author.display_name
         user_id = message.author.id
 
         try:
@@ -337,7 +339,8 @@ class MessageBridge:
 
             # Prepare the updated content
             username = after.author.name
-            user_display_name = after.author.display_name
+            # Use global_name if it exists and is different from username, otherwise use display_name
+            user_display_name = after.author.global_name if (after.author.global_name and after.author.global_name != after.author.name) else after.author.display_name
             channel_name = after.channel.name
             content = f"**#{channel_name}** - {user_display_name} (@{username}) *[edited]*:\n{after.content}"
 
@@ -380,7 +383,8 @@ class MessageBridge:
 
             # Prepare the updated content
             username = after.author.name
-            user_display_name = after.author.display_name
+            # Use global_name if it exists and is different from username, otherwise use display_name
+            user_display_name = after.author.global_name if (after.author.global_name and after.author.global_name != after.author.name) else after.author.display_name
             content = f"**{user_display_name}** (@{username}) *[edited]*:\n{after.content}"
 
             # Edit the Telegram message
@@ -1191,7 +1195,7 @@ def run_telegram_bot():
 
     # Add message handlers for topic messages (matching old.py structure)
     # Text messages (excluding photos and replies)
-    
+
     # Add edit handler for edited messages
     edit_handler = MessageHandler(
         filters.UpdateType.EDITED_MESSAGE,

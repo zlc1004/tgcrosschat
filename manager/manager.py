@@ -446,6 +446,51 @@ class InstanceManager:
             logger.error(f"Failed to recreate instance {old_stack_name}: {e}")
             return False
 
+    def update_instance(self, docker_stack_name: str) -> bool:
+        """Update instance: docker compose down, git pull, docker compose up -d --build"""
+        instance_path = self.instances_dir / docker_stack_name
+
+        if not instance_path.exists():
+            logger.error(f"Instance path does not exist: {instance_path}")
+            return False
+
+        try:
+            # Step 1: Stop containers
+            logger.info(f"Stopping containers for instance {docker_stack_name}")
+            subprocess.run([
+                "docker", "compose", "-p", docker_stack_name, "down"
+            ], cwd=instance_path, check=True, capture_output=True, text=True)
+
+            # Step 2: Git pull latest changes
+            logger.info(f"Pulling latest code for instance {docker_stack_name}")
+            subprocess.run([
+                "git", "pull"
+            ], cwd=instance_path, check=True, capture_output=True, text=True)
+
+            # Step 3: Start containers with rebuild
+            logger.info(f"Rebuilding and starting containers for instance {docker_stack_name}")
+            subprocess.run([
+                "docker", "compose", "-p", docker_stack_name, "up", "-d", "--build"
+            ], cwd=instance_path, check=True, capture_output=True, text=True)
+
+            # Update instance status
+            for instance in self.instances:
+                if instance["docker_stack_name"] == docker_stack_name:
+                    instance["status"] = "running"
+                    break
+            self.save_data()
+
+            logger.info(f"Successfully updated instance {docker_stack_name}")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to update instance {docker_stack_name}: {e}")
+            logger.error(f"Command output: {e.stderr}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error updating instance {docker_stack_name}: {e}")
+            return False
+
     def list_instances(self) -> List[Dict]:
         """List all instances"""
         return self.instances.copy()
@@ -606,6 +651,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             instance_index = int(query.data[5:])  # Remove "edit_" prefix
             await edit_instance_callback(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("update_"):
+        try:
+            instance_index = int(query.data[7:])  # Remove "update_" prefix
+            await update_instance_action(update, context, instance_index)
         except ValueError:
             await query.edit_message_text(
                 "❌ **Invalid Action**\n\n"
@@ -784,6 +839,7 @@ async def manage_instance_callback(update: Update, context: ContextTypes.DEFAULT
     keyboard.append([InlineKeyboardButton("🔄 Refresh Status", callback_data=f"manage_{instance_index}")])
     keyboard.append([InlineKeyboardButton("📊 View Details", callback_data=f"details_{instance_index}")])
     keyboard.append([InlineKeyboardButton("✏️ Edit Instance", callback_data=f"edit_{instance_index}")])
+    keyboard.append([InlineKeyboardButton("🔄 Update Instance", callback_data=f"update_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🗑️ Delete Instance", callback_data=f"delete_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🔙 Back to List", callback_data="stop_instance")])
 
@@ -875,6 +931,64 @@ async def resume_instance_action(update: Update, context: ContextTypes.DEFAULT_T
             f"❌ **Failed to Resume Instance**\n\n"
             f"Could not resume instance `{short_id}...`\n\n"
             f"Please check the logs for more details.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+async def update_instance_action(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Update an instance (git pull + rebuild)"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    stack_name = instance['docker_stack_name']
+    short_id = stack_name[:8]
+
+    # Show processing message
+    await update.callback_query.edit_message_text(
+        f"🔄 **Updating Instance**\n\n"
+        f"Instance: `{short_id}...`\n\n"
+        f"⏳ Step 1/3: Stopping containers...\n"
+        f"⏳ Step 2/3: Pulling latest code...\n"
+        f"⏳ Step 3/3: Rebuilding and starting...\n\n"
+        f"This may take a few moments...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    try:
+        success = instance_manager.update_instance(stack_name)
+
+        if success:
+            await update.callback_query.edit_message_text(
+                f"✅ **Instance Updated Successfully**\n\n"
+                f"Instance: `{short_id}...`\n\n"
+                f"✅ Containers stopped\n"
+                f"✅ Code updated (git pull)\n"
+                f"✅ Rebuilt and restarted\n\n"
+                f"The instance is now running the latest version.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.callback_query.edit_message_text(
+                f"❌ **Update Failed**\n\n"
+                f"Instance: `{short_id}...`\n\n"
+                f"Failed to update the instance. The instance may still be running the old version.\n\n"
+                f"Please check the logs for more details.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+    except Exception as e:
+        await update.callback_query.edit_message_text(
+            f"❌ **Update Error**\n\n"
+            f"Instance: `{short_id}...`\n\n"
+            f"Error during update: {str(e)}\n\n"
+            f"Please try again or check the logs.",
             parse_mode=ParseMode.MARKDOWN
         )
 

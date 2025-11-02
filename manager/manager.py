@@ -536,9 +536,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             instance_index = int(query.data[5:])  # Remove "edit_" prefix
             await edit_instance_callback(update, context, instance_index)
-        except ValueError:
+        except ValueError as e:
             await query.edit_message_text(
-                "❌ **Invalid Action**\n\n"
+                "❌ **Debug: Edit Action Failed**\n\n"
+                f"Callback data: `{query.data}`\n"
+                f"Parsed string: `{query.data[5:]}`\n"
+                f"Error: {str(e)}\n\n"
                 "Please try again.",
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -576,9 +579,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             instance_index = int(query.data[19:])  # Remove "edit_discord_token_" prefix
             await edit_discord_token_callback(update, context, instance_index)
-        except ValueError:
+        except ValueError as e:
             await query.edit_message_text(
-                "❌ **Invalid Action**\n\n"
+                "❌ **Debug: Discord Token Edit Failed**\n\n"
+                f"Callback data: `{query.data}`\n"
+                f"Parsed string: `{query.data[19:]}`\n"
+                f"Error: {str(e)}\n\n"
                 "Please try again.",
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -586,9 +592,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             instance_index = int(query.data[20:])  # Remove "edit_telegram_token_" prefix
             await edit_telegram_token_callback(update, context, instance_index)
-        except ValueError:
+        except ValueError as e:
             await query.edit_message_text(
-                "❌ **Invalid Action**\n\n"
+                "❌ **Debug: Telegram Token Edit Failed**\n\n"
+                f"Callback data: `{query.data}`\n"
+                f"Parsed string: `{query.data[20:]}`\n"
+                f"Error: {str(e)}\n\n"
                 "Please try again.",
                 parse_mode=ParseMode.MARKDOWN
             )

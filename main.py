@@ -151,8 +151,8 @@ class MessageBridge:
                 if reply_mapping:
                     reply_to_message_id = reply_mapping["telegram_message_id"]
 
-            # Prepare the message content with channel context
-            content = f"**#{channel_name}** - {user_display_name} (@{username}):\n{message.content}"
+            # Prepare the message content
+            content = f"**{user_display_name}** (@{username}):\n{message.content}"
 
             # Send message to Telegram topic
             telegram_msg = await self.telegram_bot.send_message(
@@ -188,14 +188,14 @@ class MessageBridge:
                             chat_id=TOPICS_CHANNEL_ID,
                             message_thread_id=topic_id,
                             photo=attachment.url,
-                            caption=f"Image from #{channel_name} - {user_display_name}"
+                            caption=f"Image from {user_display_name}"
                         )
                     else:
                         telegram_attachment = await self.telegram_bot.send_document(
                             chat_id=TOPICS_CHANNEL_ID,
                             message_thread_id=topic_id,
                             document=attachment.url,
-                            caption=f"File from #{channel_name} - {user_display_name}: {attachment.filename}"
+                            caption=f"File from {user_display_name}: {attachment.filename}"
                         )
 
                     # Store attachment mapping
@@ -220,10 +220,10 @@ class MessageBridge:
                 except Exception as e:
                     logger.error(f"Failed to send attachment {attachment.filename}: {e}")
 
-            logger.info(f"Forwarded channel message from #{channel_name} to topic {topic_id}")
+            logger.info(f"Forwarded channel message from {channel_name} to topic {topic_id}")
 
         except Exception as e:
-            logger.error(f"Failed to forward channel message from #{channel_name}: {e}")
+            logger.error(f"Failed to forward channel message from {channel_name}: {e}")
 
     async def forward_discord_to_telegram(self, message: discord.Message):
         """Forward Discord DM to Telegram topic"""
@@ -342,7 +342,7 @@ class MessageBridge:
             # Use global_name if it exists and is different from username, otherwise use display_name
             user_display_name = after.author.global_name if (after.author.global_name and after.author.global_name != after.author.name) else after.author.display_name
             channel_name = after.channel.name
-            content = f"**#{channel_name}** - {user_display_name} (@{username}) *[edited]*:\n{after.content}"
+            content = f"**{user_display_name}** (@{username}) *[edited]*:\n{after.content}"
 
             # Edit the Telegram message
             await self.telegram_bot.edit_message_text(

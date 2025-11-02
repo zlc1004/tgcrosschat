@@ -756,7 +756,7 @@ async def manage_instance_callback(update: Update, context: ContextTypes.DEFAULT
     instance['status'] = current_status
     instance_manager.save_data()
 
-    status_emoji = "🟢" if current_status == "running" else "🔴" if current_status == "stopped" else "🟡"
+    status_emoji = "���" if current_status == "running" else "🔴" if current_status == "stopped" else "🟡"
     status_text = current_status.title()
 
     message = f"⚙️ **Instance Management**\n\n"
@@ -1746,7 +1746,8 @@ def main():
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(conversation_handler)
     application.add_handler(CallbackQueryHandler(button_callback, pattern="^(list_instances|create_instance|stop_instance|help|back_to_menu)$"))
-    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(manage|pause|resume|delete|confirm_delete|details|edit|edit_discord_token|edit_telegram_token|edit_topics_channel|preserve_db|start_edit_discord|start_edit_telegram|start_edit_topics)_\d+$"))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(manage|pause|resume|delete|confirm_delete|details|edit)_\d+$"))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(edit_discord_token_|edit_telegram_token_|edit_topics_channel_|preserve_db_|start_edit_discord_|start_edit_telegram_|start_edit_topics_)\d+$"))
     application.add_handler(CallbackQueryHandler(back_to_menu_callback, pattern="^back_to_menu$"))
     # Add message handler for edit inputs (lower priority)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_input))

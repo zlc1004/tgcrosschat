@@ -532,59 +532,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Please try again.",
                 parse_mode=ParseMode.MARKDOWN
             )
-    elif query.data.startswith("edit_"):
-        try:
-            instance_index = int(query.data[5:])  # Remove "edit_" prefix
-            await edit_instance_callback(update, context, instance_index)
-        except ValueError as e:
-            await query.edit_message_text(
-                "❌ **Debug: Edit Action Failed**\n\n"
-                f"Callback data: `{query.data}`\n"
-                f"Parsed string: `{query.data[5:]}`\n"
-                f"Error: {str(e)}\n\n"
-                "Please try again.",
-                parse_mode=ParseMode.MARKDOWN
-            )
-    elif query.data.startswith("delete_"):
-        try:
-            instance_index = int(query.data[7:])  # Remove "delete_" prefix
-            await delete_instance_action(update, context, instance_index)
-        except ValueError:
-            await query.edit_message_text(
-                "❌ **Invalid Action**\n\n"
-                "Please try again.",
-                parse_mode=ParseMode.MARKDOWN
-            )
-    elif query.data.startswith("confirm_delete_"):
-        try:
-            instance_index = int(query.data[15:])  # Remove "confirm_delete_" prefix
-            await confirm_delete_instance(update, context, instance_index)
-        except ValueError:
-            await query.edit_message_text(
-                "❌ **Invalid Action**\n\n"
-                "Please try again.",
-                parse_mode=ParseMode.MARKDOWN
-            )
-    elif query.data.startswith("details_"):
-        try:
-            instance_index = int(query.data[8:])  # Remove "details_" prefix
-            await show_instance_details(update, context, instance_index)
-        except ValueError:
-            await query.edit_message_text(
-                "❌ **Invalid Action**\n\n"
-                "Please try again.",
-                parse_mode=ParseMode.MARKDOWN
-            )
     elif query.data.startswith("edit_discord_token_"):
         try:
             instance_index = int(query.data[19:])  # Remove "edit_discord_token_" prefix
             await edit_discord_token_callback(update, context, instance_index)
-        except ValueError as e:
+        except ValueError:
             await query.edit_message_text(
-                "❌ **Debug: Discord Token Edit Failed**\n\n"
-                f"Callback data: `{query.data}`\n"
-                f"Parsed string: `{query.data[19:]}`\n"
-                f"Error: {str(e)}\n\n"
+                "❌ **Invalid Action**\n\n"
                 "Please try again.",
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -592,12 +546,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             instance_index = int(query.data[20:])  # Remove "edit_telegram_token_" prefix
             await edit_telegram_token_callback(update, context, instance_index)
-        except ValueError as e:
+        except ValueError:
             await query.edit_message_text(
-                "❌ **Debug: Telegram Token Edit Failed**\n\n"
-                f"Callback data: `{query.data}`\n"
-                f"Parsed string: `{query.data[20:]}`\n"
-                f"Error: {str(e)}\n\n"
+                "❌ **Invalid Action**\n\n"
                 "Please try again.",
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -645,6 +596,46 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             instance_index = int(query.data[18:])  # Remove "start_edit_topics_" prefix
             await start_edit_topics_channel(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("edit_"):
+        try:
+            instance_index = int(query.data[5:])  # Remove "edit_" prefix
+            await edit_instance_callback(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("delete_"):
+        try:
+            instance_index = int(query.data[7:])  # Remove "delete_" prefix
+            await delete_instance_action(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("confirm_delete_"):
+        try:
+            instance_index = int(query.data[15:])  # Remove "confirm_delete_" prefix
+            await confirm_delete_instance(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+    elif query.data.startswith("details_"):
+        try:
+            instance_index = int(query.data[8:])  # Remove "details_" prefix
+            await show_instance_details(update, context, instance_index)
         except ValueError:
             await query.edit_message_text(
                 "❌ **Invalid Action**\n\n"

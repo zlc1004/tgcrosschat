@@ -642,6 +642,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Please try again.",
                 parse_mode=ParseMode.MARKDOWN
             )
+    else:
+        # Fallback for unrecognized callback data
+        await query.edit_message_text(
+            "❌ **Unknown Action**\n\n"
+            f"Callback data: `{query.data}`\n\n"
+            "Please return to the main menu and try again.",
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 async def list_instances_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all instances with status"""
@@ -1745,9 +1753,7 @@ def main():
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(conversation_handler)
-    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(list_instances|create_instance|stop_instance|help|back_to_menu)$"))
-    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(manage|pause|resume|delete|confirm_delete|details|edit)_\d+$"))
-    application.add_handler(CallbackQueryHandler(button_callback, pattern="^(edit_discord_token_|edit_telegram_token_|edit_topics_channel_|preserve_db_|start_edit_discord_|start_edit_telegram_|start_edit_topics_)\d+$"))
+    application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(CallbackQueryHandler(back_to_menu_callback, pattern="^back_to_menu$"))
     # Add message handler for edit inputs (lower priority)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_input))

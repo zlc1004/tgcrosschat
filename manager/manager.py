@@ -667,6 +667,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Please try again.",
                 parse_mode=ParseMode.MARKDOWN
             )
+    elif query.data.startswith("recreate_"):
+        try:
+            instance_index = int(query.data[9:])  # Remove "recreate_" prefix
+            await recreate_instance_action(update, context, instance_index)
+        except ValueError:
+            await query.edit_message_text(
+                "❌ **Invalid Action**\n\n"
+                "Please try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
     elif query.data.startswith("delete_"):
         try:
             instance_index = int(query.data[7:])  # Remove "delete_" prefix
@@ -840,6 +850,7 @@ async def manage_instance_callback(update: Update, context: ContextTypes.DEFAULT
     keyboard.append([InlineKeyboardButton("📊 View Details", callback_data=f"details_{instance_index}")])
     keyboard.append([InlineKeyboardButton("✏️ Edit Instance", callback_data=f"edit_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🔄 Update Instance", callback_data=f"update_{instance_index}")])
+    keyboard.append([InlineKeyboardButton("🔄 Recreate Instance", callback_data=f"recreate_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🗑️ Delete Instance", callback_data=f"delete_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🔙 Back to List", callback_data="stop_instance")])
 
@@ -983,12 +994,84 @@ async def update_instance_action(update: Update, context: ContextTypes.DEFAULT_T
                 parse_mode=ParseMode.MARKDOWN
             )
 
+        except Exception as e:
+            await update.callback_query.edit_message_text(
+                f"❌ **Update Error**\n\n"
+                f"Instance: `{short_id}...`\n\n"
+                f"Error during update: {str(e)}\n\n"
+                f"Please try again or check the logs.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+async def recreate_instance_action(update: Update, context: ContextTypes.DEFAULT_TYPE, instance_index: int):
+    """Recreate an instance (delete and create fresh)"""
+    instances = instance_manager.list_instances()
+
+    if instance_index < 0 or instance_index >= len(instances):
+        await update.callback_query.edit_message_text(
+            "❌ **Invalid Instance**\n\n"
+            "The selected instance no longer exists.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    instance = instances[instance_index]
+    old_stack_name = instance['docker_stack_name']
+    short_id = old_stack_name[:8]
+
+    # Show processing message
+    await update.callback_query.edit_message_text(
+        f"🔄 **Recreating Instance**\n\n"
+        f"Instance: `{short_id}...`\n\n"
+        f"⏳ Step 1/4: Stopping and removing old instance...\n"
+        f"⏳ Step 2/4: Cloning fresh code...\n"
+        f"⏳ Step 3/4: Setting up environment...\n"
+        f"⏳ Step 4/4: Starting new instance...\n\n"
+        f"⚠️ **Warning:** All data will be lost!\n"
+        f"This may take a few moments...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    try:
+        success = instance_manager.recreate_instance(instance_index)
+
+        if success:
+            # Get the new instance data after recreation
+            updated_instances = instance_manager.list_instances()
+            new_instance = None
+            for inst in updated_instances:
+                if inst['chatid'] == instance['chatid']:
+                    new_instance = inst
+                    break
+
+            new_short_id = new_instance['docker_stack_name'][:8] if new_instance else "unknown"
+
+            await update.callback_query.edit_message_text(
+                f"✅ **Instance Recreated Successfully**\n\n"
+                f"Old Instance: `{short_id}...`\n"
+                f"New Instance: `{new_short_id}...`\n\n"
+                f"✅ Old instance removed\n"
+                f"✅ Fresh code cloned\n"
+                f"✅ Environment configured\n"
+                f"✅ New instance started\n\n"
+                f"The instance has been completely recreated with fresh code and data.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.callback_query.edit_message_text(
+                f"❌ **Recreate Failed**\n\n"
+                f"Instance: `{short_id}...`\n\n"
+                f"Failed to recreate the instance. The original instance may have been removed.\n\n"
+                f"Please check the logs and try creating a new instance manually.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
     except Exception as e:
         await update.callback_query.edit_message_text(
-            f"❌ **Update Error**\n\n"
+            f"❌ **Recreate Error**\n\n"
             f"Instance: `{short_id}...`\n\n"
-            f"Error during update: {str(e)}\n\n"
-            f"Please try again or check the logs.",
+            f"Error during recreation: {str(e)}\n\n"
+            f"The original instance may have been partially removed. Please check the logs.",
             parse_mode=ParseMode.MARKDOWN
         )
 

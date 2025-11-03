@@ -994,7 +994,7 @@ async def update_instance_action(update: Update, context: ContextTypes.DEFAULT_T
                 parse_mode=ParseMode.MARKDOWN
             )
 
-        except Exception as e:
+    except Exception as e:
             await update.callback_query.edit_message_text(
                 f"❌ **Update Error**\n\n"
                 f"Instance: `{short_id}...`\n\n"
@@ -1094,7 +1094,7 @@ async def delete_instance_action(update: Update, context: ContextTypes.DEFAULT_T
     # Show confirmation
     keyboard = [
         [InlineKeyboardButton("✅ Yes, Delete", callback_data=f"confirm_delete_{instance_index}")],
-        [InlineKeyboardButton("❌ Cancel", callback_data=f"manage_{instance_index}")]
+        [InlineKeyboardButton("�� Cancel", callback_data=f"manage_{instance_index}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 

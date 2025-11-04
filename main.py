@@ -136,7 +136,11 @@ class MessageBridge:
         topic_id = mapping["telegram_topic_id"]
         username = message.author.name
         # Use global_name if it exists and is different from username, otherwise use display_name
-        user_display_name = message.author.global_name if (message.author.global_name and message.author.global_name != message.author.name) else message.author.display_name
+        try:
+            global_name = message.author.global_name
+        except AttributeError:
+            global_name = message.author.display_name  # Fallback for older discord.py versions
+        user_display_name = global_name if (global_name and global_name != username) else message.author.display_name
         channel_name = message.channel.name
 
         try:
@@ -229,7 +233,11 @@ class MessageBridge:
         """Forward Discord DM to Telegram topic"""
         username = message.author.name
         # Use global_name if it exists and is different from username, otherwise use display_name
-        user_display_name = message.author.global_name if (message.author.global_name and message.author.global_name != message.author.name) else message.author.display_name
+        try:
+            global_name = message.author.global_name
+        except AttributeError:
+            global_name = message.author.display_name  # Fallback for older discord.py versions
+        user_display_name = global_name if (global_name and global_name != username) else message.author.display_name
         user_id = message.author.id
 
         try:
@@ -340,7 +348,11 @@ class MessageBridge:
             # Prepare the updated content
             username = after.author.name
             # Use global_name if it exists and is different from username, otherwise use display_name
-            user_display_name = after.author.global_name if (after.author.global_name and after.author.global_name != after.author.name) else after.author.display_name
+            try:
+                global_name = after.author.global_name
+            except AttributeError:
+                global_name = after.author.display_name  # Fallback for older discord.py versions
+            user_display_name = global_name if (global_name and global_name != username) else after.author.display_name
             channel_name = after.channel.name
             content = f"**{user_display_name}** (@{username}) *[edited]*:\n{after.content}"
 
@@ -384,7 +396,11 @@ class MessageBridge:
             # Prepare the updated content
             username = after.author.name
             # Use global_name if it exists and is different from username, otherwise use display_name
-            user_display_name = after.author.global_name if (after.author.global_name and after.author.global_name != after.author.name) else after.author.display_name
+            try:
+                global_name = after.author.global_name
+            except AttributeError:
+                global_name = after.author.display_name  # Fallback for older discord.py versions
+            user_display_name = global_name if (global_name and global_name != username) else after.author.display_name
             content = f"**{user_display_name}** (@{username}) *[edited]*:\n{after.content}"
 
             # Edit the Telegram message

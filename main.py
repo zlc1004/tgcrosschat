@@ -1189,6 +1189,12 @@ def run_discord_bot():
     except Exception as e:
         logger.error(f"Failed to start Discord bot: {e}")
 
+async def header_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+                f"Header test:\n`{create_header(discord_client, 'DISCORD_TOKEN')}`",
+                parse_mode=ParseMode.MARKDOWN
+    )
+
 def run_telegram_bot():
     """Run Telegram bot in main thread"""
     # Add ping command handler
@@ -1206,6 +1212,10 @@ def run_telegram_bot():
     # Add unlink command handler
     unlink_handler = CommandHandler("unlink", unlink_command)
     telegram_app.add_handler(unlink_handler)
+
+    # Add header command handler for testing
+    header_handler = CommandHandler("header", header_command)
+    telegram_app.add_handler(header_handler)
 
     # Add message handlers for topic messages (matching old.py structure)
     # Text messages (excluding photos and replies)

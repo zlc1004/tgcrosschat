@@ -3,7 +3,7 @@ import os
 import discord
 import requests
 from dotenv import load_dotenv
-from telegram import Bot, Update
+from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 import asyncio
@@ -11,6 +11,30 @@ from pymongo import MongoClient
 from datetime import datetime
 import threading
 import json
+
+def create_header(bot, auth_token):
+    headers = {
+            'Accept-Language': 'en-US',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Origin': 'https://discord.com',
+            'Pragma': 'no-cache',
+            'Referer': 'https://discord.com/channels/@me',
+            'Sec-CH-UA': '"Google Chrome";v="{0}", "Chromium";v="{0}", ";Not A Brand";v="99"'.format(
+                bot.http.browser_version.split('.')[0]
+            ),
+            'Sec-CH-UA-Mobile': '?0',
+            'Sec-CH-UA-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'User-Agent': bot.http.user_agent,
+            'X-Discord-Locale': 'en-US',
+            'X-Debug-Options': 'bugReporterEnabled',
+            'X-Super-Properties': bot.http.encoded_super_properties,
+            'Authorization': auth_token
+    }
+    return headers
 
 # Load environment variables
 load_dotenv()
@@ -526,11 +550,7 @@ class MessageBridge:
                 payload["message_reference"] = message_reference
 
             # Send the message
-            headers = {
-                "Authorization": DISCORD_TOKEN,  # For selfbots, no "Bot" prefix
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-            }
+            headers = create_header(discord_client, DISCORD_TOKEN)
 
             response = requests.post(
                 f"https://discord.com/api/v9/channels/{dm_channel_id}/messages",
@@ -597,10 +617,7 @@ class MessageBridge:
             # Convert payload_json to string
             data['payload_json'] = json.dumps(data['payload_json'])
 
-            headers = {
-                "Authorization": DISCORD_TOKEN,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-            }
+            headers = create_header(discord_client, DISCORD_TOKEN)
 
             response = requests.post(
                 f"https://discord.com/api/v9/channels/{dm_channel_id}/messages",
@@ -650,10 +667,7 @@ class MessageBridge:
             # Convert payload_json to string
             data['payload_json'] = json.dumps(data['payload_json'])
 
-            headers = {
-                "Authorization": DISCORD_TOKEN,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-            }
+            headers = create_header(discord_client, DISCORD_TOKEN)
 
             response = requests.post(
                 f"https://discord.com/api/v9/channels/{discord_channel_id}/messages",
@@ -734,11 +748,7 @@ class MessageBridge:
                 payload["message_reference"] = message_reference
 
             # Send the message
-            headers = {
-                "Authorization": DISCORD_TOKEN,
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-            }
+            headers = create_header(discord_client, DISCORD_TOKEN)
 
             response = requests.post(
                 f"https://discord.com/api/v9/channels/{discord_channel_id}/messages",
@@ -776,11 +786,7 @@ class MessageBridge:
     async def _get_discord_channel_info(self, channel_id: int) -> dict:
         """Get Discord channel and server information using HTTP API"""
         try:
-            headers = {
-                "Authorization": DISCORD_TOKEN,
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-            }
+            headers = create_header(discord_client, DISCORD_TOKEN)
 
             # Get channel information
             response = requests.get(
@@ -822,11 +828,7 @@ class MessageBridge:
     async def _get_or_create_dm_channel(self, discord_user_id: int) -> str:
         """Create or get DM channel with a Discord user using HTTP API"""
         try:
-            headers = {
-                "Authorization": DISCORD_TOKEN,  # For selfbots, no "Bot" prefix
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-            }
+            headers = create_header(discord_client, DISCORD_TOKEN)
 
             payload = {
                 "recipient_id": str(discord_user_id)
@@ -900,11 +902,7 @@ class MessageBridge:
         try:
             new_content = f"{update.edited_message.text or '[Media/File]'} *[edited]*"
 
-            headers = {
-                "Authorization": DISCORD_TOKEN,
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-            }
+            headers = create_header(discord_client, DISCORD_TOKEN)
 
             payload = {
                 "content": new_content

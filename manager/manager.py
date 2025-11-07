@@ -560,6 +560,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start_token_extraction_callback(update, context)
     elif query.data == "qr_scanned":
         await qr_scanned_callback(update, context)
+    elif query.data == "rescreenshot_qr":
+        await rescreenshot_qr_callback(update, context)
     elif query.data == "cancel_token_extraction":
         await cancel_token_extraction_callback(update, context)
     elif query.data == "help":
@@ -1043,7 +1045,7 @@ async def recreate_instance_action(update: Update, context: ContextTypes.DEFAULT
         f"⏳ Step 1/4: Stopping and removing old instance...\n"
         f"⏳ Step 2/4: Cloning fresh code...\n"
         f"⏳ Step 3/4: Setting up environment...\n"
-        f"⏳ Step 4/4: Starting new instance...\n\n"
+        f"��� Step 4/4: Starting new instance...\n\n"
         f"⚠️ **Warning:** All data will be lost!\n"
         f"This may take a few moments...",
         parse_mode=ParseMode.MARKDOWN
@@ -1972,7 +1974,7 @@ async def start_token_extraction_callback(update: Update, context: ContextTypes.
 
         # Step 1: Navigate to Discord login
         await query.edit_message_text(
-            "🔄 **Starting Token Extraction...**\n\n"
+            "���� **Starting Token Extraction...**\n\n"
             "Step 2/4: Opening Discord login page...",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -2008,6 +2010,7 @@ async def start_token_extraction_callback(update: Update, context: ContextTypes.
             # Send the screenshot
             keyboard = [
                 [InlineKeyboardButton("✅ I've Scanned the QR Code", callback_data="qr_scanned")],
+                [InlineKeyboardButton("🔄 Rescreenshot QR", callback_data="rescreenshot_qr")],
                 [InlineKeyboardButton("❌ Cancel", callback_data="cancel_token_extraction")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -2043,6 +2046,78 @@ async def start_token_extraction_callback(update: Update, context: ContextTypes.
             "❌ **Browser Initialization Failed**\n\n"
             f"Error: {str(e)}\n\n"
             "Please make sure Chrome is installed and try again.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+async def rescreenshot_qr_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Take a new screenshot of the QR code"""
+    if not await is_authorized_chat(update):
+        return
+
+    query = update.callback_query
+    await query.answer()
+
+    try:
+        driver = context.user_data.get('discord_driver')
+        if not driver:
+            await query.edit_message_caption(
+                caption="❌ **Error**\n\nBrowser session lost. Please start over.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        # Show progress
+        await query.edit_message_caption(
+            caption="🔄 **Taking new QR screenshot...**\n\nPlease wait...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        try:
+            # Find QR code container again
+            qr_element = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".qrCodeContainer_c28498.qrCode_e16417"))
+            )
+
+            # Take new screenshot using BytesIO
+            screenshot_bytes = qr_element.screenshot_as_png
+            photo_buffer = BytesIO(screenshot_bytes)
+            photo_buffer.name = "discord_qr.png"
+
+            # Delete the old photo message
+            await query.message.delete()
+
+            # Send new screenshot
+            keyboard = [
+                [InlineKeyboardButton("✅ I've Scanned the QR Code", callback_data="qr_scanned")],
+                [InlineKeyboardButton("🔄 Rescreenshot QR", callback_data="rescreenshot_qr")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="cancel_token_extraction")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await context.bot.send_photo(
+                chat_id=query.message.chat_id,
+                photo=photo_buffer,
+                caption="📱 **Discord QR Code (Updated)**\n\nScan this QR code with your Discord mobile app to login.\n\nClick the button below when you've completed the login process.",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to rescreenshot QR code: {e}")
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="❌ **Rescreenshot Failed**\n\n"
+                     "Could not take a new screenshot of the QR code.\n"
+                     "The QR code may have expired or Discord's interface may have changed.\n\n"
+                     "Please try cancelling and starting over.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+    except Exception as e:
+        logger.error(f"Error in rescreenshot QR callback: {e}")
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"❌ **Error**\n\nFailed to rescreenshot QR code: {str(e)}",
             parse_mode=ParseMode.MARKDOWN
         )
 

@@ -4,17 +4,27 @@ TGCrossChat Manager Bot
 Manages multiple TGCrossChat instances through Telegram bot interface
 """
 
+import os
 import json
 import hashlib
 import subprocess
 import shutil
 import logging
+import asyncio
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
+from io import BytesIO
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ConversationHandler, ContextTypes, filters
 from telegram.constants import ParseMode
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import undetected_chromedriver as uc
 
 import config
 
@@ -517,6 +527,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📋 List Instances", callback_data="list_instances")],
         [InlineKeyboardButton("➕ Create Instance", callback_data="create_instance")],
         [InlineKeyboardButton("⚙️ Manage Instances", callback_data="stop_instance")],
+        [InlineKeyboardButton("🔑 Get Token", callback_data="get_token")],
         [InlineKeyboardButton("ℹ️ Help", callback_data="help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -543,6 +554,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await create_instance_callback(update, context)
     elif query.data == "stop_instance":
         await stop_instance_callback(update, context)
+    elif query.data == "get_token":
+        await get_token_callback(update, context)
+    elif query.data == "start_token_extraction":
+        await start_token_extraction_callback(update, context)
+    elif query.data == "qr_scanned":
+        await qr_scanned_callback(update, context)
+    elif query.data == "cancel_token_extraction":
+        await cancel_token_extraction_callback(update, context)
     elif query.data == "help":
         await help_callback(update, context)
     elif query.data.startswith("manage_"):
@@ -850,7 +869,7 @@ async def manage_instance_callback(update: Update, context: ContextTypes.DEFAULT
     keyboard.append([InlineKeyboardButton("🔄 Update Instance", callback_data=f"update_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🔄 Recreate Instance", callback_data=f"recreate_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🗑️ Delete Instance", callback_data=f"delete_{instance_index}")])
-    keyboard.append([InlineKeyboardButton("🔙 Back to List", callback_data="stop_instance")])
+    keyboard.append([InlineKeyboardButton("��� Back to List", callback_data="stop_instance")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -1900,12 +1919,250 @@ async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
 
+async def get_token_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start Discord token extraction process"""
+    if not await is_authorized_chat(update):
+        return
+
+    query = update.callback_query
+    await query.answer()
+
+    # Show initial message
+    keyboard = [
+        [InlineKeyboardButton("🔄 Start Token Extraction", callback_data="start_token_extraction")],
+        [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        "🔑 **Discord Token Extraction**\n\n"
+        "This will:\n"
+        "1. Open Discord login page\n"
+        "2. Take a screenshot of the QR code\n"
+        "3. Wait for you to scan it\n"
+        "4. Extract your Discord token\n\n"
+        "⚠️ **Warning:** Keep your token private and secure!\n\n"
+        "Click the button below to start the process.",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+async def start_token_extraction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start the token extraction process"""
+    if not await is_authorized_chat(update):
+        return
+
+    query = update.callback_query
+    await query.answer()
+
+    # Show progress message
+    await query.edit_message_text(
+        "🔄 **Starting Token Extraction...**\n\n"
+        "Step 1/4: Initializing browser...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    try:
+        # Initialize undetected Chrome driver
+        options = uc.ChromeOptions()
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+
+        driver = uc.Chrome(options=options)
+
+        # Step 1: Navigate to Discord login
+        await query.edit_message_text(
+            "🔄 **Starting Token Extraction...**\n\n"
+            "Step 2/4: Opening Discord login page...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        driver.get("https://discord.com/login")
+
+        # Wait for page to load
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
+        )
+
+        # Wait 1 second as requested
+        time.sleep(1)
+
+        # Step 2: Take screenshot of QR code
+        await query.edit_message_text(
+            "🔄 **Starting Token Extraction...**\n\n"
+            "Step 3/4: Taking QR code screenshot...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        try:
+            # Wait for QR code container to appear
+            qr_element = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".qrCodeContainer_c28498.qrCode_e16417"))
+            )
+
+            # Take screenshot of the QR code element using BytesIO
+            screenshot_bytes = qr_element.screenshot_as_png
+            photo_buffer = BytesIO(screenshot_bytes)
+            photo_buffer.name = "discord_qr.png"  # Set filename for Telegram
+
+            # Send the screenshot
+            keyboard = [
+                [InlineKeyboardButton("✅ I've Scanned the QR Code", callback_data="qr_scanned")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="cancel_token_extraction")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await context.bot.send_photo(
+                chat_id=query.message.chat_id,
+                photo=photo_buffer,
+                caption="📱 **Discord QR Code**\n\nScan this QR code with your Discord mobile app to login.\n\nClick the button below when you've completed the login process.",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+            # Store driver in context for later use
+            context.user_data['discord_driver'] = driver
+
+        except Exception as e:
+            logger.error(f"Failed to find QR code: {e}")
+            driver.quit()
+            await query.edit_message_text(
+                "❌ **QR Code Not Found**\n\n"
+                "Could not locate the Discord QR code.\n"
+                "This might be because:\n"
+                "• Discord's interface has changed\n"
+                "• The page didn't load properly\n"
+                "• You're already logged in\n\n"
+                "Please try again or check the Discord login page manually.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+    except Exception as e:
+        logger.error(f"Failed to start token extraction: {e}")
+        await query.edit_message_text(
+            "❌ **Browser Initialization Failed**\n\n"
+            f"Error: {str(e)}\n\n"
+            "Please make sure Chrome is installed and try again.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+async def qr_scanned_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle when user confirms QR code was scanned"""
+    if not await is_authorized_chat(update):
+        return
+
+    query = update.callback_query
+    await query.answer()
+
+    # Show progress message
+    await query.edit_message_text(
+        "🔄 **Extracting Token...**\n\n"
+        "Step 4/4: Running token extraction script...",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+    try:
+        driver = context.user_data.get('discord_driver')
+        if not driver:
+            await query.edit_message_text(
+                "❌ **Error**\n\nBrowser session lost. Please start over.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        # Read and execute the JavaScript file
+        script_path = Path(__file__).parent / "get-token.js"
+        with open(script_path, 'r') as f:
+            js_script = f.read()
+
+        # Execute the JavaScript to get the token
+        token = driver.execute_script(js_script)
+
+        # Clean up the browser
+        driver.quit()
+        context.user_data.pop('discord_driver', None)
+
+        if token:
+            keyboard = [
+                [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(
+                f"✅ **Token Extracted Successfully!**\n\n"
+                f"**Your Discord Token:**\n"
+                f"`{token}`\n\n"
+                f"⚠️ **Important:** Keep this token private and secure!\n"
+                f"Do not share it with anyone.\n\n"
+                f"You can now use this token to create TGCrossChat instances.",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+            # Also print to console as requested
+            print(f"Discord Token: {token}")
+
+        else:
+            await query.edit_message_text(
+                "❌ **Token Extraction Failed**\n\n"
+                "Could not extract the Discord token.\n"
+                "This might be because:\n"
+                "• You haven't completed the login process\n"
+                "• Discord's interface has changed\n"
+                "• The token extraction script needs updating\n\n"
+                "Please try again or login manually.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+    except Exception as e:
+        logger.error(f"Failed to extract token: {e}")
+
+        # Clean up driver if it exists
+        driver = context.user_data.get('discord_driver')
+        if driver:
+            driver.quit()
+            context.user_data.pop('discord_driver', None)
+
+        await query.edit_message_text(
+            f"❌ **Token Extraction Failed**\n\n"
+            f"Error: {str(e)}\n\n"
+            f"Please try again or check the logs for more details.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+async def cancel_token_extraction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel the token extraction process"""
+    if not await is_authorized_chat(update):
+        return
+
+    query = update.callback_query
+    await query.answer()
+
+    # Clean up driver if it exists
+    driver = context.user_data.get('discord_driver')
+    if driver:
+        driver.quit()
+        context.user_data.pop('discord_driver', None)
+
+    keyboard = [
+        [InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        "❌ **Token Extraction Cancelled**\n\n"
+        "The browser has been closed and the process was cancelled.",
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
+    )
+
 async def back_to_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Return to main menu"""
     keyboard = [
         [InlineKeyboardButton("📋 List Instances", callback_data="list_instances")],
         [InlineKeyboardButton("➕ Create Instance", callback_data="create_instance")],
         [InlineKeyboardButton("⚙️ Manage Instances", callback_data="stop_instance")],
+        [InlineKeyboardButton("🔑 Get Token", callback_data="get_token")],
         [InlineKeyboardButton("ℹ️ Help", callback_data="help")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)

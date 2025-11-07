@@ -564,6 +564,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await rescreenshot_qr_callback(update, context)
     elif query.data == "cancel_token_extraction":
         await cancel_token_extraction_callback(update, context)
+    elif query.data == "back_to_menu":
+        await back_to_menu_callback(update, context)
     elif query.data == "help":
         await help_callback(update, context)
     elif query.data.startswith("manage_"):
@@ -1045,7 +1047,7 @@ async def recreate_instance_action(update: Update, context: ContextTypes.DEFAULT
         f"⏳ Step 1/4: Stopping and removing old instance...\n"
         f"⏳ Step 2/4: Cloning fresh code...\n"
         f"⏳ Step 3/4: Setting up environment...\n"
-        f"��� Step 4/4: Starting new instance...\n\n"
+        f"⏳ Step 4/4: Starting new instance...\n\n"
         f"⚠️ **Warning:** All data will be lost!\n"
         f"This may take a few moments...",
         parse_mode=ParseMode.MARKDOWN
@@ -1974,7 +1976,7 @@ async def start_token_extraction_callback(update: Update, context: ContextTypes.
 
         # Step 1: Navigate to Discord login
         await query.edit_message_text(
-            "���� **Starting Token Extraction...**\n\n"
+            "🔄 **Starting Token Extraction...**\n\n"
             "Step 2/4: Opening Discord login page...",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -2367,7 +2369,6 @@ def main():
     application.add_handler(CommandHandler("id", id_command))
     application.add_handler(conversation_handler)
     application.add_handler(CallbackQueryHandler(button_callback))
-    application.add_handler(CallbackQueryHandler(back_to_menu_callback, pattern="^back_to_menu$"))
     # Add message handler for edit inputs (lower priority)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_input))
 

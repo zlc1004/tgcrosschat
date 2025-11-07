@@ -4,12 +4,10 @@ TGCrossChat Manager Bot
 Manages multiple TGCrossChat instances through Telegram bot interface
 """
 
-import os
 import json
 import hashlib
 import subprocess
 import shutil
-import asyncio
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional

@@ -869,7 +869,7 @@ async def manage_instance_callback(update: Update, context: ContextTypes.DEFAULT
     keyboard.append([InlineKeyboardButton("🔄 Update Instance", callback_data=f"update_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🔄 Recreate Instance", callback_data=f"recreate_{instance_index}")])
     keyboard.append([InlineKeyboardButton("🗑️ Delete Instance", callback_data=f"delete_{instance_index}")])
-    keyboard.append([InlineKeyboardButton("��� Back to List", callback_data="stop_instance")])
+    keyboard.append([InlineKeyboardButton("🔙 Back to List", callback_data="stop_instance")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -2054,12 +2054,24 @@ async def qr_scanned_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
 
-    # Show progress message
-    await query.edit_message_text(
-        "🔄 **Extracting Token...**\n\n"
-        "Step 4/4: Running token extraction script...",
-        parse_mode=ParseMode.MARKDOWN
-    )
+    # Show progress message - handle photo message by deleting and sending new
+    try:
+        await query.edit_message_text(
+            "🔄 **Extracting Token...**\n\n"
+            "Step 4/4: Running token extraction script...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception:
+        # If editing fails (it's a photo message), delete and send new message
+        await query.message.delete()
+        progress_message = await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="🔄 **Extracting Token...**\n\n"
+                 "Step 4/4: Running token extraction script...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        # Store the new message for later editing
+        context.user_data['progress_message'] = progress_message
 
     try:
         driver = context.user_data.get('discord_driver')
@@ -2088,31 +2100,73 @@ async def qr_scanned_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
-            await query.edit_message_text(
+            success_text = (
                 f"✅ **Token Extracted Successfully!**\n\n"
                 f"**Your Discord Token:**\n"
                 f"`{token}`\n\n"
                 f"⚠️ **Important:** Keep this token private and secure!\n"
                 f"Do not share it with anyone.\n\n"
-                f"You can now use this token to create TGCrossChat instances.",
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.MARKDOWN
+                f"You can now use this token to create TGCrossChat instances."
             )
+
+            # Check if we have a progress message to edit, otherwise edit the callback query message
+            progress_message = context.user_data.get('progress_message')
+            if progress_message:
+                await progress_message.edit_text(
+                    success_text,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                context.user_data.pop('progress_message', None)
+            else:
+                try:
+                    await query.edit_message_text(
+                        success_text,
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                except Exception:
+                    await context.bot.send_message(
+                        chat_id=query.message.chat_id,
+                        text=success_text,
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
 
             # Also print to console as requested
             print(f"Discord Token: {token}")
 
         else:
-            await query.edit_message_text(
+            error_text = (
                 "❌ **Token Extraction Failed**\n\n"
                 "Could not extract the Discord token.\n"
                 "This might be because:\n"
                 "• You haven't completed the login process\n"
                 "• Discord's interface has changed\n"
                 "• The token extraction script needs updating\n\n"
-                "Please try again or login manually.",
-                parse_mode=ParseMode.MARKDOWN
+                "Please try again or login manually."
             )
+
+            # Check if we have a progress message to edit, otherwise edit the callback query message
+            progress_message = context.user_data.get('progress_message')
+            if progress_message:
+                await progress_message.edit_text(
+                    error_text,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                context.user_data.pop('progress_message', None)
+            else:
+                try:
+                    await query.edit_message_text(
+                        error_text,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                except Exception:
+                    await context.bot.send_message(
+                        chat_id=query.message.chat_id,
+                        text=error_text,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
 
     except Exception as e:
         logger.error(f"Failed to extract token: {e}")
@@ -2123,12 +2177,32 @@ async def qr_scanned_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             driver.quit()
             context.user_data.pop('discord_driver', None)
 
-        await query.edit_message_text(
+        error_text = (
             f"❌ **Token Extraction Failed**\n\n"
             f"Error: {str(e)}\n\n"
-            f"Please try again or check the logs for more details.",
-            parse_mode=ParseMode.MARKDOWN
+            f"Please try again or check the logs for more details."
         )
+
+        # Check if we have a progress message to edit, otherwise handle the callback query message
+        progress_message = context.user_data.get('progress_message')
+        if progress_message:
+            await progress_message.edit_text(
+                error_text,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            context.user_data.pop('progress_message', None)
+        else:
+            try:
+                await query.edit_message_text(
+                    error_text,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception:
+                await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=error_text,
+                    parse_mode=ParseMode.MARKDOWN
+                )
 
 async def cancel_token_extraction_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the token extraction process"""
@@ -2149,12 +2223,24 @@ async def cancel_token_extraction_callback(update: Update, context: ContextTypes
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(
-        "❌ **Token Extraction Cancelled**\n\n"
-        "The browser has been closed and the process was cancelled.",
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
-    )
+    try:
+        # Try to edit message text first
+        await query.edit_message_text(
+            "❌ **Token Extraction Cancelled**\n\n"
+            "The browser has been closed and the process was cancelled.",
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception:
+        # If editing fails (e.g., it's a photo message), delete and send new message
+        await query.message.delete()
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="❌ **Token Extraction Cancelled**\n\n"
+                 "The browser has been closed and the process was cancelled.",
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 async def back_to_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Return to main menu"""

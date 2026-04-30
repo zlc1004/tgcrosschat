@@ -58,7 +58,7 @@ TOPICS_CHANNEL_ID = int(os.getenv('TOPICS_CHANNEL_ID'))
 if not DISCORD_TOKEN or not TELEGRAM_BOT_TOKEN or not TOPICS_CHANNEL_ID:
     raise ValueError("Missing required environment variables. Check your .env file.")
 
-MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024  # 5 MB
+MAX_ATTACHMENT_SIZE = 9 * 1024 * 1024  # 9 MB
 
 def escape_markdown(text: str) -> str:
     """Escape special characters for Telegram Markdown v1, avoiding URLs."""
@@ -767,14 +767,22 @@ class MessageBridge:
             # Handle images and documents
             file_data = None
             filename = None
+
             if update.message.photo:
                 photo = update.message.photo[-1]
                 file_size = photo.file_size
-                if file_size is None or file_size > MAX_ATTACHMENT_SIZE:
-                    tg_file = await photo.get_file()
+                tg_file = await photo.get_file()
+                if file_size is None:
+                    # Try to download and forward as file (don't just send link)
+                    try:
+                        file_data = bytes(await tg_file.download_as_bytearray())
+                        filename = f"photo_{photo.file_unique_id}.jpg"
+                    except Exception as e:
+                        logger.error(f"Failed to download Telegram photo: {e}")
+                        content = (content or "") + "\n" + tg_file.file_path
+                elif file_size > MAX_ATTACHMENT_SIZE:
                     content = (content or "") + "\n" + tg_file.file_path
                 else:
-                    tg_file = await photo.get_file()
                     file_data = bytes(await tg_file.download_as_bytearray())
                     filename = f"photo_{photo.file_unique_id}.jpg"
 
@@ -1021,14 +1029,22 @@ class MessageBridge:
             filename = None
             full_content = content
 
+
             if update.message.photo:
                 photo = update.message.photo[-1]
                 file_size = photo.file_size
-                if file_size is None or file_size > MAX_ATTACHMENT_SIZE:
-                    tg_file = await photo.get_file()
+                tg_file = await photo.get_file()
+                if file_size is None:
+                    # Try to download and forward as file (don't just send link)
+                    try:
+                        file_data = bytes(await tg_file.download_as_bytearray())
+                        filename = f"photo_{photo.file_unique_id}.jpg"
+                    except Exception as e:
+                        logger.error(f"Failed to download Telegram photo: {e}")
+                        full_content = (full_content or "") + "\n" + tg_file.file_path
+                elif file_size > MAX_ATTACHMENT_SIZE:
                     full_content = (full_content or "") + "\n" + tg_file.file_path
                 else:
-                    tg_file = await photo.get_file()
                     file_data = bytes(await tg_file.download_as_bytearray())
                     filename = f"photo_{photo.file_unique_id}.jpg"
 

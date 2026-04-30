@@ -34,16 +34,16 @@ logger = logging.getLogger(__name__)
 # Conversation states
 WAITING_DISCORD_TOKEN, WAITING_TELEGRAM_TOKEN, WAITING_TOPICS_CHANNEL = range(3)
 
-# Data file path
-DATA_FILE = Path("data.json")
+# Data file path (inside instances/ so a single volume mount covers all state)
 INSTANCES_DIR = Path("instances")
+DATA_FILE = INSTANCES_DIR / "data.json"
 
 class InstanceManager:
     def __init__(self):
         self.data_file = DATA_FILE
         self.instances_dir = INSTANCES_DIR
 
-        # Ensure instances directory exists
+        # Ensure instances directory exists (also covers DATA_FILE's parent)
         self.instances_dir.mkdir(exist_ok=True)
 
         # Load existing data
@@ -99,7 +99,7 @@ services:
   mongo:
     image: mongo:4.4
     volumes:
-      - ./mongo_data:/data/db
+      - {mongo_data_path}:/data/db
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
@@ -129,10 +129,20 @@ services:
             shutil.rmtree(instance_path)
         instance_path.mkdir(parents=True)
 
-        # Write compose.yaml using the GHCR image
+        # Write compose.yaml using the GHCR image.
+        # When the manager runs inside a container the Docker daemon runs on the
+        # host, so volume source paths must be host-absolute paths.  HOST_PWD is
+        # set to the host working directory by compose.yaml (see the manager's
+        # own compose.yaml).
+        host_pwd = os.environ.get("HOST_PWD")
+        if host_pwd:
+            mongo_data_path = f"{host_pwd}/instances/{instance_hash}/mongo_data"
+        else:
+            mongo_data_path = "./mongo_data"
+
         compose_path = instance_path / "compose.yaml"
         with open(compose_path, 'w') as f:
-            f.write(self.COMPOSE_TEMPLATE.format(image=self.GHCR_IMAGE))
+            f.write(self.COMPOSE_TEMPLATE.format(image=self.GHCR_IMAGE, mongo_data_path=mongo_data_path))
 
         # Write .env file
         env_content = (

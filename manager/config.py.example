@@ -1,6 +1,10 @@
+import os
+
 # Telegram Bot Token for the manager bot (get from @BotFather)
-telegram_bot_token = "your_manager_bot_token_here"
+# Can be set via the MANAGER_BOT_TOKEN environment variable
+telegram_bot_token = os.environ.get("MANAGER_BOT_TOKEN", "your_manager_bot_token_here")
 
 # Telegram Username (without @) of the authorized user
 # The bot will only respond to DMs from this user
-telegram_username = "your_username_here"
+# Can be set via the MANAGER_USERNAME environment variable
+telegram_username = os.environ.get("MANAGER_USERNAME", "your_username_here")

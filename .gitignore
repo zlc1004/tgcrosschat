@@ -79,3 +79,4 @@ package-lock.json
 manager/config.py
 manager/data.json
 manager/instances
+manager/.env

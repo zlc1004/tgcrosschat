@@ -1,0 +1,18 @@
+services:
+  manager:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      # HOST_PWD tells the manager the host-side path that maps to /app/instances
+      # inside the container, so Docker volume mounts in spawned instance
+      # containers resolve correctly on the Docker daemon (host) side.
+      - HOST_PWD=${PWD}
+    volumes:
+      # Grant access to the host Docker daemon so the manager can create and
+      # control sibling containers.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist instance configs and manager state on the host.
+      - ./instances:/app/instances
+    restart: unless-stopped

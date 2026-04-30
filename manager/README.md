@@ -2,7 +2,26 @@
 
 A Telegram bot to manage multiple TGCrossChat instances that bridge Discord and Telegram.
 
-## Quick Setup
+## Quick Setup (Docker — recommended)
+
+1. **Copy the environment file and fill in your values**:
+   ```bash
+   cp .env.example .env
+   # edit .env: set MANAGER_BOT_TOKEN and MANAGER_USERNAME
+   ```
+
+2. **Start the manager**:
+   ```bash
+   docker compose up -d --build
+   ```
+
+3. **Use the bot**: Send `/start` in a DM with your manager bot.
+
+> **Note:** The `instances/` directory is created automatically on first run and
+> stores all spawned instance configs and MongoDB data. Keep it around — deleting
+> it removes all managed instances.
+
+## Manual Setup (without Docker)
 
 1. **Configure the bot**:
    ```python
@@ -13,7 +32,8 @@ A Telegram bot to manage multiple TGCrossChat instances that bridge Discord and 
 
 2. **Install dependencies**:
    ```bash
-   pip install python-telegram-bot==22.0
+   pip install -r requirements.txt
+   python -m patchright install --with-deps chromium
    ```
 
 3. **Run the manager**:
@@ -40,9 +60,11 @@ Each instance:
 - Can be paused/resumed without data loss
 - Uses unique hash-based naming
 
+When running containerised the manager communicates with the host Docker daemon
+via the mounted socket (`/var/run/docker.sock`) and uses `HOST_PWD` to resolve
+volume paths so that sibling containers mount the correct host directories.
+
 ## Requirements
 
 - Docker & Docker Compose
-- Git
-- Python 3.7+
 - Telegram bot token (from @BotFather)
